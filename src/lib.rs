@@ -14,6 +14,6 @@ pub mod scanner;
 pub use config::Config;
 pub use error::{Result, SweeperError};
 pub use scanner::{
-    format_table, format_tree, scan_directory, scan_directory_parallel, DirEntry, FormatOptions,
-    ScanOptions,
+    format_json, format_json_summary, format_table, format_tree, scan_directory,
+    scan_directory_parallel, DirEntry, FormatOptions, ScanOptions, SummarizedEntry,
 };

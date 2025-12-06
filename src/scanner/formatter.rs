@@ -197,6 +197,49 @@ fn format_table_recursive(
     }
 }
 
+/// Format entry as JSON
+pub fn format_json(entry: &DirEntry, pretty: bool) -> Result<String, serde_json::Error> {
+    if pretty {
+        serde_json::to_string_pretty(entry)
+    } else {
+        serde_json::to_string(entry)
+    }
+}
+
+/// Simplified JSON structure for large outputs
+#[derive(serde::Serialize)]
+pub struct SummarizedEntry {
+    pub path: String,
+    pub size: u64,
+    pub size_human: String,
+    pub file_count: u64,
+    pub dir_count: u64,
+    pub children: Vec<SummarizedEntry>,
+}
+
+impl From<&DirEntry> for SummarizedEntry {
+    fn from(entry: &DirEntry) -> Self {
+        Self {
+            path: entry.path.to_string_lossy().to_string(),
+            size: entry.size,
+            size_human: format_size(entry.size),
+            file_count: entry.file_count,
+            dir_count: entry.dir_count,
+            children: entry.children.iter().map(SummarizedEntry::from).collect(),
+        }
+    }
+}
+
+/// Format as summarized JSON (smaller output)
+pub fn format_json_summary(entry: &DirEntry, pretty: bool) -> Result<String, serde_json::Error> {
+    let summary = SummarizedEntry::from(entry);
+    if pretty {
+        serde_json::to_string_pretty(&summary)
+    } else {
+        serde_json::to_string(&summary)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +378,59 @@ mod tests {
 
         // subdir should appear after more spaces than root name
         assert!(subdir_line.find("subdir").unwrap() > root_line.find("test").unwrap());
+    }
+
+    #[test]
+    fn test_format_json() {
+        let entry = create_test_entry();
+        let json = format_json(&entry, false).unwrap();
+
+        assert!(json.contains("\"path\""));
+        assert!(json.contains("\"size\""));
+        assert!(json.contains("\"children\""));
+    }
+
+    #[test]
+    fn test_format_json_pretty() {
+        let entry = create_test_entry();
+        let json = format_json(&entry, true).unwrap();
+
+        // Pretty JSON should have newlines
+        assert!(json.contains('\n'));
+    }
+
+    #[test]
+    fn test_format_json_summary() {
+        let entry = create_test_entry();
+        let json = format_json_summary(&entry, false).unwrap();
+
+        assert!(json.contains("size_human"));
+        assert!(json.contains("1.00 MB") || json.contains("1 MB"));
+    }
+
+    #[test]
+    fn test_format_json_summary_structure() {
+        let entry = create_test_entry();
+        let json = format_json_summary(&entry, true).unwrap();
+
+        // Should have the expected fields
+        assert!(json.contains("\"path\""));
+        assert!(json.contains("\"size\""));
+        assert!(json.contains("\"size_human\""));
+        assert!(json.contains("\"file_count\""));
+        assert!(json.contains("\"dir_count\""));
+        assert!(json.contains("\"children\""));
+    }
+
+    #[test]
+    fn test_format_json_parseable() {
+        let entry = create_test_entry();
+        let json = format_json(&entry, false).unwrap();
+
+        // Verify it's valid JSON by parsing it
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed["path"].is_string());
+        assert!(parsed["size"].is_number());
     }
 }

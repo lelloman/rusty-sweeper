@@ -1148,7 +1148,7 @@ mod tests {
 
 ---
 
-#### [ ] Task 2.5.2: Implement JSON formatter
+#### [x] Task 2.5.2: Implement JSON formatter
 
 **Description**: Add JSON output for scripting and integration with other tools.
 
@@ -1810,7 +1810,7 @@ criterion_main!(benches);
 | 2.4.1 | Implement basic directory walker | [x] |
 | 2.4.2 | Implement parallel directory walker | [x] |
 | 2.5.1 | Implement tree formatter | [x] |
-| 2.5.2 | Implement JSON formatter | [ ] |
+| 2.5.2 | Implement JSON formatter | [x] |
 | 2.6.1 | Implement `scan` subcommand handler | [ ] |
 | 2.6.2 | Add progress indicator | [ ] |
 | 2.7.1 | Define scanner-specific errors | [ ] |
