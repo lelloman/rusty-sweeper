@@ -904,7 +904,7 @@ fn test_parallel_scan_performance() {
 
 ### 2.5 Output Formatting
 
-#### [ ] Task 2.5.1: Implement tree formatter
+#### [x] Task 2.5.1: Implement tree formatter
 
 **Description**: Create a function to format `DirEntry` as a tree structure for terminal output.
 
@@ -1809,7 +1809,7 @@ criterion_main!(benches);
 | 2.3.1 | Implement file size utilities | [x] |
 | 2.4.1 | Implement basic directory walker | [x] |
 | 2.4.2 | Implement parallel directory walker | [x] |
-| 2.5.1 | Implement tree formatter | [ ] |
+| 2.5.1 | Implement tree formatter | [x] |
 | 2.5.2 | Implement JSON formatter | [ ] |
 | 2.6.1 | Implement `scan` subcommand handler | [ ] |
 | 2.6.2 | Add progress indicator | [ ] |
