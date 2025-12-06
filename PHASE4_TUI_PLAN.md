@@ -910,7 +910,7 @@ fn test_render_does_not_panic() {
 
 ## Task 4.9: Implement Tree Widget
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -1070,7 +1070,7 @@ fn test_size_bar_proportional() {
 
 ## Task 4.10: Integrate Tree Widget into UI
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2228,8 +2228,8 @@ fn test_very_long_path() {
 | 4.6 | Event handling | `[x]` |
 | 4.7 | Navigation methods | `[x]` |
 | 4.8 | Basic UI layout | `[x]` |
-| 4.9 | Tree widget | `[ ]` |
-| 4.10 | Integrate tree widget | `[ ]` |
+| 4.9 | Tree widget | `[x]` |
+| 4.10 | Integrate tree widget | `[x]` |
 | 4.11 | Search overlay | `[ ]` |
 | 4.12 | Confirmation dialog | `[ ]` |
 | 4.13 | Help overlay | `[ ]` |
