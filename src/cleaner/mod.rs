@@ -6,5 +6,7 @@
 //! - Parallel cleaning orchestration
 
 mod detector;
+pub mod detectors;
 
 pub use detector::{DetectedProject, ProjectDetector};
+pub use detectors::all_detectors;

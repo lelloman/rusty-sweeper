@@ -143,7 +143,7 @@ mod tests {
 
 ## Task 2: Cargo Detector Implementation
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2070,7 +2070,7 @@ fn test_max_depth_limiting() {
 | Task | Description | Status |
 |------|-------------|--------|
 | 1 | ProjectDetector trait | `[x]` |
-| 2 | Cargo detector | `[ ]` |
+| 2 | Cargo detector | `[x]` |
 | 3 | Remaining detectors (8) | `[ ]` |
 | 4 | Detector registry | `[ ]` |
 | 5 | Project scanner | `[ ]` |
