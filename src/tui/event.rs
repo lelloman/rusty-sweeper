@@ -77,7 +77,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         }
 
         // Actions
-        KeyCode::Char('d') => {
+        KeyCode::Char('d') | KeyCode::Delete => {
             if app.selected_entry().is_some() {
                 app.mode = Mode::Confirm(ConfirmAction::Delete);
             }
