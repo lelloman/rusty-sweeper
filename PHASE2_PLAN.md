@@ -245,7 +245,7 @@ fn test_sort_by_size() {
 
 ---
 
-#### [ ] Task 2.1.3: Define `ScanOptions` struct
+#### [x] Task 2.1.3: Define `ScanOptions` struct
 
 **Description**: Create a configuration struct for scan operations.
 
@@ -1804,7 +1804,7 @@ criterion_main!(benches);
 |------|-------------|--------|
 | 2.1.1 | Define `DirEntry` struct | [x] |
 | 2.1.2 | Implement `DirEntry` helper methods | [x] |
-| 2.1.3 | Define `ScanOptions` struct | [ ] |
+| 2.1.3 | Define `ScanOptions` struct | [x] |
 | 2.2.1 | Create scanner module hierarchy | [ ] |
 | 2.3.1 | Implement file size utilities | [ ] |
 | 2.4.1 | Implement basic directory walker | [ ] |
