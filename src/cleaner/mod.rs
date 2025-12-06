@@ -7,6 +7,8 @@
 
 mod detector;
 pub mod detectors;
+mod registry;
 
 pub use detector::{DetectedProject, ProjectDetector};
 pub use detectors::all_detectors;
+pub use registry::DetectorRegistry;

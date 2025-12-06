@@ -496,7 +496,7 @@ pub mod helpers {
 
 ## Task 4: Detector Registry
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2072,7 +2072,7 @@ fn test_max_depth_limiting() {
 | 1 | ProjectDetector trait | `[x]` |
 | 2 | Cargo detector | `[x]` |
 | 3 | Remaining detectors (8) | `[x]` |
-| 4 | Detector registry | `[ ]` |
+| 4 | Detector registry | `[x]` |
 | 5 | Project scanner | `[ ]` |
 | 6 | Clean executor | `[ ]` |
 | 7 | Parallel orchestrator | `[ ]` |
