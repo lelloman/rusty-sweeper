@@ -389,7 +389,7 @@ impl App {
 
                     self.tree = Some(tree);
                     self.rebuild_visible_entries();
-                    self.status_message = Some("Scan complete".to_string());
+                    self.status_message = None; // Clear to show keybinding hints
                 }
                 ScanUpdate::Error { message } => {
                     self.scanning = false;
