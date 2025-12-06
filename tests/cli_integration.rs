@@ -84,12 +84,29 @@ fn invalid_config_path_fails() {
 }
 
 #[test]
-fn scan_prints_not_implemented() {
+fn scan_outputs_tree() {
     rusty_sweeper()
         .args(["scan", "."])
         .assert()
         .success()
-        .stdout(predicate::str::contains("not yet implemented"));
+        .stdout(predicate::str::contains("Total:"));
+}
+
+#[test]
+fn scan_with_json_output() {
+    rusty_sweeper()
+        .args(["scan", "--json", "."])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("{"));
+}
+
+#[test]
+fn scan_respects_depth() {
+    rusty_sweeper()
+        .args(["scan", "-d", "1", "."])
+        .assert()
+        .success();
 }
 
 #[test]

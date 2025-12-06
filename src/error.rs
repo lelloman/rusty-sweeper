@@ -22,6 +22,9 @@ pub enum SweeperError {
 
     #[error("Invalid path: {0}")]
     InvalidPath(String),
+
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 /// Configuration-specific errors

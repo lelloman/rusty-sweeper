@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use rusty_sweeper::cli::{Cli, Command};
+use rusty_sweeper::commands;
 use rusty_sweeper::config::Config;
 
 fn main() -> Result<()> {
@@ -29,8 +30,7 @@ fn main() -> Result<()> {
         }
         Command::Scan(args) => {
             tracing::info!(?args, "Starting scan");
-            println!("Scan command not yet implemented");
-            // TODO: Phase 2
+            commands::scan::run(args)?;
         }
         Command::Tui(args) => {
             tracing::info!(?args, "Starting TUI");

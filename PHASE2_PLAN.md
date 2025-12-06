@@ -1241,7 +1241,7 @@ fn test_format_json_summary() {
 
 ### 2.6 CLI Integration
 
-#### [ ] Task 2.6.1: Implement `scan` subcommand handler
+#### [x] Task 2.6.1: Implement `scan` subcommand handler
 
 **Description**: Wire up the `scan` CLI subcommand to the scanner module.
 
@@ -1811,7 +1811,7 @@ criterion_main!(benches);
 | 2.4.2 | Implement parallel directory walker | [x] |
 | 2.5.1 | Implement tree formatter | [x] |
 | 2.5.2 | Implement JSON formatter | [x] |
-| 2.6.1 | Implement `scan` subcommand handler | [ ] |
+| 2.6.1 | Implement `scan` subcommand handler | [x] |
 | 2.6.2 | Add progress indicator | [ ] |
 | 2.7.1 | Define scanner-specific errors | [ ] |
 | 2.8.1 | Create integration test suite | [ ] |
