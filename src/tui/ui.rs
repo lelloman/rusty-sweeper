@@ -189,8 +189,10 @@ fn render_entry(
     let bar_filled = "█".repeat(fill);
     let bar_empty = "░".repeat(bar_width - fill);
 
-    // Size text
+    // Size text - fixed width for alignment (max "1023.9 TiB" = 10 chars)
+    let size_width = 10;
     let size_str = humansize::format_size(entry.entry.size, humansize::BINARY);
+    let size_str_padded = format!("{:>width$}", size_str, width = size_width);
 
     // Get color for size display
     let size_style_color = size_color(entry.entry.size, max_size);
@@ -202,22 +204,30 @@ fn render_entry(
         .map(|t| format!(" [{}]", t))
         .unwrap_or_default();
 
-    // Calculate available width for name
-    let prefix_len = indent.len() + icon.len();
-    // bar is [████░░░░░░] = bar_width + 2 (for brackets)
-    let suffix_len = (bar_width + 2) + size_str.len() + 2 + project_indicator.len();
-    let name_width = (width as usize).saturating_sub(prefix_len + suffix_len);
+    // Calculate available width for name + project indicator combined
+    // Use chars().count() for display width, not byte length
+    let prefix_len = indent.chars().count() + icon.chars().count();
+    // bar is [████░░░░░░] = bar_width + 2 (for brackets), size is fixed width
+    let suffix_len = (bar_width + 2) + size_width + 2;
+    let name_area_width = (width as usize).saturating_sub(prefix_len + suffix_len);
 
-    // Truncate name if needed
+    // Project indicator comes out of the name area
+    let name_width = name_area_width.saturating_sub(project_indicator.chars().count());
+
+    // Truncate name if needed - use char boundaries for proper Unicode handling
     let name = &entry.entry.name;
-    let display_name = if name.len() > name_width && name_width > 1 {
-        format!("{}…", &name[..name_width.saturating_sub(1)])
+    let name_char_count = name.chars().count();
+    let display_name = if name_char_count > name_width && name_width > 1 {
+        let truncated: String = name.chars().take(name_width.saturating_sub(1)).collect();
+        format!("{}…", truncated)
     } else {
         name.clone()
     };
 
     // Build the line using spans for mixed colors
-    let padding = " ".repeat(name_width.saturating_sub(display_name.len()));
+    // Padding fills the remaining space in name_area after name + project indicator
+    let used_in_name_area = display_name.chars().count() + project_indicator.chars().count();
+    let padding = " ".repeat(name_area_width.saturating_sub(used_in_name_area));
 
     // Base style for name (blue for dirs, white for files)
     let name_style = if entry.entry.is_dir {
@@ -249,7 +259,7 @@ fn render_entry(
     spans.push(Span::styled(bar_empty, Style::default().fg(Color::DarkGray)));
     spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
     spans.push(Span::raw(" "));
-    spans.push(Span::styled(size_str, size_style));
+    spans.push(Span::styled(size_str_padded, size_style));
 
     let mut line = Line::from(spans);
 
