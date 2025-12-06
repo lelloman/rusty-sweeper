@@ -1515,7 +1515,7 @@ pub fn run(args: ScanArgs) -> Result<()> {
 
 ### 2.7 Error Handling
 
-#### [ ] Task 2.7.1: Define scanner-specific errors
+#### [x] Task 2.7.1: Define scanner-specific errors
 
 **Description**: Add specific error types for scanner failures.
 
@@ -1813,7 +1813,7 @@ criterion_main!(benches);
 | 2.5.2 | Implement JSON formatter | [x] |
 | 2.6.1 | Implement `scan` subcommand handler | [x] |
 | 2.6.2 | Add progress indicator | [x] |
-| 2.7.1 | Define scanner-specific errors | [ ] |
+| 2.7.1 | Define scanner-specific errors | [x] |
 | 2.8.1 | Create integration test suite | [ ] |
 | 2.8.2 | Add benchmark tests | [ ] |
 
