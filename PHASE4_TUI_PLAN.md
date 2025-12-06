@@ -1384,7 +1384,7 @@ fn test_help_overlay_renders() {
 
 ## Task 4.14: Implement Delete Action
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2233,7 +2233,7 @@ fn test_very_long_path() {
 | 4.11 | Search overlay | `[x]` |
 | 4.12 | Confirmation dialog | `[x]` |
 | 4.13 | Help overlay | `[x]` |
-| 4.14 | Delete action | `[ ]` |
+| 4.14 | Delete action | `[x]` |
 | 4.15 | Clean action | `[ ]` |
 | 4.16 | Rescan functionality | `[ ]` |
 | 4.17 | Main TUI loop | `[ ]` |

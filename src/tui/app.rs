@@ -1,7 +1,8 @@
 //! Application state for the TUI.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::scanner::DirEntry;
 
@@ -48,6 +49,15 @@ pub struct VisibleEntry {
     pub depth: usize,
     /// Whether this directory is expanded.
     pub is_expanded: bool,
+}
+
+/// Delete a file or directory.
+fn delete_path(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
 }
 
 /// Main application state for the TUI.
@@ -274,7 +284,29 @@ impl App {
 
     /// Delete the selected entry.
     pub fn delete_selected(&mut self) {
-        self.status_message = Some("Delete not yet implemented".to_string());
+        let path = match self.selected_entry() {
+            Some(entry) => entry.entry.path.clone(),
+            None => {
+                self.status_message = Some("No entry selected".to_string());
+                return;
+            }
+        };
+
+        // Don't allow deleting the root
+        if path == self.root {
+            self.status_message = Some("Cannot delete root directory".to_string());
+            return;
+        }
+
+        match delete_path(&path) {
+            Ok(()) => {
+                self.status_message = Some(format!("Deleted: {}", path.display()));
+                self.trigger_rescan();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Error: {}", e));
+            }
+        }
     }
 
     /// Clean the selected project.
@@ -622,5 +654,38 @@ mod tests {
         app.rebuild_visible_entries();
         assert_eq!(app.visible_entries[1].entry.name, "dir_a");
         assert_eq!(app.visible_entries[2].entry.name, "dir_b");
+    }
+
+    // Delete tests
+
+    #[test]
+    fn test_delete_path_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "test").unwrap();
+
+        assert!(file_path.exists());
+        delete_path(&file_path).unwrap();
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_delete_path_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir_path = temp_dir.path().join("subdir");
+        fs::create_dir(&dir_path).unwrap();
+        fs::write(dir_path.join("file.txt"), "test").unwrap();
+
+        assert!(dir_path.exists());
+        delete_path(&dir_path).unwrap();
+        assert!(!dir_path.exists());
+    }
+
+    #[test]
+    fn test_delete_selected_no_entry() {
+        let mut app = App::new(PathBuf::from("/"));
+        app.delete_selected();
+        assert!(app.status_message.is_some());
+        assert!(app.status_message.as_ref().unwrap().contains("No entry"));
     }
 }
