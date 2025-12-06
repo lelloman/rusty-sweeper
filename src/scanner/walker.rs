@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use walkdir::WalkDir;
 
 use crate::error::{Result, SweeperError};
@@ -9,6 +10,17 @@ use crate::error::{Result, SweeperError};
 use super::entry::DirEntry;
 use super::options::ScanOptions;
 use super::size::{apparent_size, disk_usage};
+
+/// Update sent during progressive scan.
+#[derive(Debug, Clone)]
+pub enum ScanUpdate {
+    /// Partial tree with current progress. `scanning` is the name of the entry being scanned.
+    Progress { tree: DirEntry, scanning: Option<String> },
+    /// Scan finished successfully.
+    Complete { tree: DirEntry },
+    /// Error occurred during scan.
+    Error { message: String },
+}
 
 /// Scan a directory and return a tree of DirEntry
 pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
@@ -174,9 +186,34 @@ fn scan_dir_recursive_parallel(
         return Ok(DirEntry::new_dir(path.to_path_buf(), None));
     }
 
-    let metadata = match fs::metadata(path) {
+    // Use symlink_metadata to not follow symlinks
+    let symlink_meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) => return Ok(DirEntry::new_error(path.to_path_buf(), e.to_string())),
+    };
+
+    // If it's a symlink, skip it (unless follow_symlinks is enabled)
+    if symlink_meta.file_type().is_symlink() {
+        if !options.follow_symlinks {
+            // Return a zero-size file entry for the symlink itself
+            return Ok(DirEntry::new_file(
+                path.to_path_buf(),
+                0,
+                0,
+                symlink_meta.modified().ok(),
+            ));
+        }
+        // If following symlinks, get the target metadata
+    }
+
+    // Get actual metadata (follows symlinks if it is one and we got here)
+    let metadata = if symlink_meta.file_type().is_symlink() {
+        match fs::metadata(path) {
+            Ok(m) => m,
+            Err(e) => return Ok(DirEntry::new_error(path.to_path_buf(), e.to_string())),
+        }
+    } else {
+        symlink_meta
     };
 
     // If it's a file, return immediately
@@ -238,6 +275,104 @@ fn scan_dir_recursive_parallel(
     dir_entry.sort_by_size();
 
     Ok(dir_entry)
+}
+
+/// Progressive directory scanner that sends updates as it scans.
+///
+/// Scans top-level entries sequentially, sending a tree update after each completes.
+/// Each individual entry is scanned in parallel internally for speed.
+pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender<ScanUpdate>) {
+    let root = match root.canonicalize() {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = tx.send(ScanUpdate::Error {
+                message: format!("Cannot access path: {}", e),
+            });
+            return;
+        }
+    };
+
+    let metadata = match fs::metadata(&root) {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = tx.send(ScanUpdate::Error {
+                message: format!("Cannot read root: {}", e),
+            });
+            return;
+        }
+    };
+
+    // Read top-level directory entries
+    let read_dir = match fs::read_dir(&root) {
+        Ok(rd) => rd,
+        Err(e) => {
+            let _ = tx.send(ScanUpdate::Error {
+                message: format!("Cannot read directory: {}", e),
+            });
+            return;
+        }
+    };
+
+    // Collect top-level entries to process
+    let entries: Vec<_> = read_dir
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            if ScanOptions::is_linux_virtual_fs(&path) {
+                return false;
+            }
+            if !options.include_hidden {
+                if let Some(name) = path.file_name() {
+                    if name.to_string_lossy().starts_with('.') {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .collect();
+
+    let total = entries.len();
+    let mut children: Vec<DirEntry> = Vec::new();
+
+    // Process each top-level entry sequentially, but each entry scans in parallel internally
+    for (idx, entry) in entries.into_iter().enumerate() {
+        let child_path = entry.path();
+        let entry_name = child_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // Send "scanning" status before we start
+        let _ = tx.send(ScanUpdate::Progress {
+            tree: build_partial_tree(&root, &metadata, &children),
+            scanning: Some(format!("({}/{}) {}", idx + 1, total, entry_name)),
+        });
+
+        // Scan this entry (parallel internally via scan_dir_recursive_parallel)
+        let child_entry = match scan_dir_recursive_parallel(&child_path, options, 1) {
+            Ok(e) => e,
+            Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
+        };
+        children.push(child_entry);
+    }
+
+    // Build final tree
+    let mut tree = build_partial_tree(&root, &metadata, &children);
+    let _ = tx.send(ScanUpdate::Complete { tree });
+}
+
+/// Helper to build a partial tree from accumulated children.
+fn build_partial_tree(
+    root: &Path,
+    metadata: &std::fs::Metadata,
+    children: &[DirEntry],
+) -> DirEntry {
+    let mut tree = DirEntry::new_dir(root.to_path_buf(), metadata.modified().ok());
+    tree.children = children.to_vec();
+    tree.recalculate_totals();
+    tree.sort_by_size();
+    tree
 }
 
 #[cfg(test)]

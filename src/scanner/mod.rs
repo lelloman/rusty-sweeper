@@ -10,4 +10,4 @@ pub use formatter::{
 };
 pub use options::ScanOptions;
 pub use size::format_size;
-pub use walker::{scan_directory, scan_directory_parallel};
+pub use walker::{scan_directory, scan_directory_parallel, scan_directory_progressive, ScanUpdate};

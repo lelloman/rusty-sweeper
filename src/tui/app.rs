@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 
 use nix::sys::statvfs::statvfs;
@@ -11,7 +11,7 @@ use nix::sys::statvfs::statvfs;
 use crate::cleaner::{
     CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
 };
-use crate::scanner::{scan_directory, DirEntry, ScanOptions};
+use crate::scanner::{scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate};
 use walkdir::WalkDir;
 
 /// The current UI mode.
@@ -96,9 +96,6 @@ fn detect_project_type(path: &Path) -> Option<String> {
     None
 }
 
-/// Result from a background scan operation.
-type ScanResult = Result<DirEntry, String>;
-
 /// Main application state for the TUI.
 pub struct App {
     /// Root directory being explored.
@@ -137,8 +134,8 @@ pub struct App {
     /// Is currently scanning.
     pub scanning: bool,
 
-    /// Receiver for background scan results.
-    scan_receiver: Option<Receiver<ScanResult>>,
+    /// Receiver for progressive scan updates.
+    scan_receiver: Option<Receiver<ScanUpdate>>,
 
     /// Handle to the background scan thread.
     #[allow(dead_code)]
@@ -334,7 +331,7 @@ impl App {
     // Scanning methods
 
     /// Start a background scan of the root directory.
-    /// The scan runs in a separate thread and results are polled via `poll_scan_result`.
+    /// The scan runs in a separate thread and sends progressive updates via `poll_scan_result`.
     pub fn start_background_scan(&mut self) {
         // Don't start a new scan if one is already running
         if self.scanning {
@@ -342,44 +339,48 @@ impl App {
         }
 
         self.scanning = true;
+        self.status_message = Some("Scanning...".to_string());
 
-        let (tx, rx): (Sender<ScanResult>, Receiver<ScanResult>) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         self.scan_receiver = Some(rx);
 
         let root = self.root.clone();
 
-        // Spawn background thread for scanning
+        // Spawn background thread for progressive scanning
         let handle = thread::spawn(move || {
             let options = ScanOptions::default().with_hidden(true);
-            let result = scan_directory(&root, &options)
-                .map_err(|e| e.to_string());
-            // Send result (ignore error if receiver dropped - user quit)
-            let _ = tx.send(result);
+            scan_directory_progressive(&root, &options, tx);
         });
 
         self.scan_thread = Some(handle);
     }
 
-    /// Poll for scan results from the background thread.
-    /// Returns true if a result was received and processed.
+    /// Poll for scan updates from the background thread.
+    /// Returns true if an update was received and processed.
     pub fn poll_scan_result(&mut self) -> bool {
-        let result = if let Some(ref rx) = self.scan_receiver {
+        let update = if let Some(ref rx) = self.scan_receiver {
             rx.try_recv().ok()
         } else {
             None
         };
 
-        if let Some(scan_result) = result {
-            self.scanning = false;
-            self.scan_receiver = None;
-            self.scan_thread = None;
+        if let Some(scan_update) = update {
+            match scan_update {
+                ScanUpdate::Progress { tree, scanning } => {
+                    self.tree = Some(tree);
+                    self.rebuild_visible_entries();
+                    if let Some(name) = scanning {
+                        self.status_message = Some(format!("Scanning: {}", name));
+                    }
+                }
+                ScanUpdate::Complete { tree } => {
+                    self.scanning = false;
+                    self.scan_receiver = None;
+                    self.scan_thread = None;
 
-            match scan_result {
-                Ok(tree) => {
                     // Preserve expanded paths that still exist
                     let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();
                     self.expanded.clear();
-
                     for path in old_expanded {
                         if path.exists() {
                             self.expanded.insert(path);
@@ -388,9 +389,13 @@ impl App {
 
                     self.tree = Some(tree);
                     self.rebuild_visible_entries();
+                    self.status_message = Some("Scan complete".to_string());
                 }
-                Err(e) => {
-                    self.status_message = Some(format!("Scan error: {}", e));
+                ScanUpdate::Error { message } => {
+                    self.scanning = false;
+                    self.scan_receiver = None;
+                    self.scan_thread = None;
+                    self.status_message = Some(format!("Scan error: {}", message));
                 }
             }
             return true;
