@@ -29,19 +29,15 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
     install_panic_hook();
     let mut terminal = init_terminal()?;
 
-    // Initialize app
+    // Initialize app and start background scan
     let mut app = App::new(root);
-
-    // Show "Scanning..." before the blocking scan
-    app.scanning = true;
-    app.expanded.insert(app.root.clone());
-    terminal.draw(|frame| render(&app, frame))?;
-
-    // Now perform the actual scan
-    app.trigger_rescan();
+    app.start_initial_scan();
 
     // Main loop
     while !app.should_quit {
+        // Poll for scan results from background thread
+        app.poll_scan_result();
+
         // Render
         terminal.draw(|frame| render(&app, frame))?;
 

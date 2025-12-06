@@ -3,14 +3,16 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 
 use nix::sys::statvfs::statvfs;
 
 use crate::cleaner::{
     CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
 };
-use walkdir::WalkDir;
 use crate::scanner::{scan_directory, DirEntry, ScanOptions};
+use walkdir::WalkDir;
 
 /// The current UI mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,15 +89,15 @@ fn detect_project_type(path: &Path) -> Option<String> {
         if detector.detect(path) {
             // Extract short name from display_name (e.g., "Rust/Cargo" -> "Rust")
             let display_name = detector.display_name();
-            let short_name = display_name
-                .split('/')
-                .next()
-                .unwrap_or(display_name);
+            let short_name = display_name.split('/').next().unwrap_or(display_name);
             return Some(short_name.to_string());
         }
     }
     None
 }
+
+/// Result from a background scan operation.
+type ScanResult = Result<DirEntry, String>;
 
 /// Main application state for the TUI.
 pub struct App {
@@ -134,6 +136,13 @@ pub struct App {
 
     /// Is currently scanning.
     pub scanning: bool,
+
+    /// Receiver for background scan results.
+    scan_receiver: Option<Receiver<ScanResult>>,
+
+    /// Handle to the background scan thread.
+    #[allow(dead_code)]
+    scan_thread: Option<JoinHandle<()>>,
 }
 
 impl App {
@@ -152,6 +161,8 @@ impl App {
             should_quit: false,
             status_message: None,
             scanning: false,
+            scan_receiver: None,
+            scan_thread: None,
         }
     }
 
@@ -320,9 +331,75 @@ impl App {
         self.status_message = Some(format!("Sort: {:?}", self.sort_order));
     }
 
-    // Action stubs (will be fully implemented in Tasks 4.14-4.16)
+    // Scanning methods
 
-    /// Trigger a rescan of the root directory.
+    /// Start a background scan of the root directory.
+    /// The scan runs in a separate thread and results are polled via `poll_scan_result`.
+    pub fn start_background_scan(&mut self) {
+        // Don't start a new scan if one is already running
+        if self.scanning {
+            return;
+        }
+
+        self.scanning = true;
+
+        let (tx, rx): (Sender<ScanResult>, Receiver<ScanResult>) = mpsc::channel();
+        self.scan_receiver = Some(rx);
+
+        let root = self.root.clone();
+
+        // Spawn background thread for scanning
+        let handle = thread::spawn(move || {
+            let options = ScanOptions::default().with_hidden(true);
+            let result = scan_directory(&root, &options)
+                .map_err(|e| e.to_string());
+            // Send result (ignore error if receiver dropped - user quit)
+            let _ = tx.send(result);
+        });
+
+        self.scan_thread = Some(handle);
+    }
+
+    /// Poll for scan results from the background thread.
+    /// Returns true if a result was received and processed.
+    pub fn poll_scan_result(&mut self) -> bool {
+        let result = if let Some(ref rx) = self.scan_receiver {
+            rx.try_recv().ok()
+        } else {
+            None
+        };
+
+        if let Some(scan_result) = result {
+            self.scanning = false;
+            self.scan_receiver = None;
+            self.scan_thread = None;
+
+            match scan_result {
+                Ok(tree) => {
+                    // Preserve expanded paths that still exist
+                    let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();
+                    self.expanded.clear();
+
+                    for path in old_expanded {
+                        if path.exists() {
+                            self.expanded.insert(path);
+                        }
+                    }
+
+                    self.tree = Some(tree);
+                    self.rebuild_visible_entries();
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Scan error: {}", e));
+                }
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// Trigger a rescan of the root directory (blocking version for tests).
     pub fn trigger_rescan(&mut self) {
         self.scanning = true;
 
@@ -355,6 +432,12 @@ impl App {
     pub fn initial_scan(&mut self) {
         self.expanded.insert(self.root.clone());
         self.trigger_rescan();
+    }
+
+    /// Start initial scan in background, expanding root by default.
+    pub fn start_initial_scan(&mut self) {
+        self.expanded.insert(self.root.clone());
+        self.start_background_scan();
     }
 
     /// Delete the selected entry.

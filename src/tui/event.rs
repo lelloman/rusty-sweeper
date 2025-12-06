@@ -88,7 +88,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('r') => {
-            app.trigger_rescan();
+            app.start_background_scan();
         }
 
         // Search

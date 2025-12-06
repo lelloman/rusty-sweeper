@@ -417,8 +417,15 @@ fn test_tui_rescan() {
     // Create a new file outside TUI
     fs::write(temp.path().join("new_file.txt"), "content").unwrap();
 
-    // Press r to rescan
+    // Press r to start background rescan
     handle_key_event(&mut app, key_char('r'));
+
+    // Wait for background scan to complete (with timeout)
+    let start = std::time::Instant::now();
+    while app.scanning && start.elapsed() < std::time::Duration::from_secs(5) {
+        app.poll_scan_result();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 
     // Should now see the new file
     assert!(app.visible_entries.len() > initial_count);
