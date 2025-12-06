@@ -200,6 +200,87 @@ impl App {
             }
         }
     }
+
+    // Navigation methods (stubs - will be fully implemented in Task 4.7)
+
+    /// Move selection by delta, clamping to valid range.
+    pub fn move_selection(&mut self, delta: i32) {
+        if self.visible_entries.is_empty() {
+            return;
+        }
+
+        let new_selected = if delta < 0 {
+            self.selected.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.selected.saturating_add(delta as usize)
+        };
+
+        self.selected = new_selected.min(self.visible_entries.len() - 1);
+    }
+
+    /// Expand selected directory.
+    pub fn expand_selected(&mut self) {
+        if let Some(entry) = self.selected_entry().cloned() {
+            if entry.entry.is_dir && !entry.is_expanded {
+                self.expanded.insert(entry.entry.path);
+                self.rebuild_visible_entries();
+            }
+        }
+    }
+
+    /// Collapse selected directory or go to parent.
+    pub fn collapse_selected(&mut self) {
+        if let Some(entry) = self.selected_entry().cloned() {
+            if entry.is_expanded {
+                self.expanded.remove(&entry.entry.path);
+                self.rebuild_visible_entries();
+            } else {
+                self.go_to_parent();
+            }
+        }
+    }
+
+    /// Move selection to parent directory.
+    pub fn go_to_parent(&mut self) {
+        if let Some(entry) = self.selected_entry() {
+            if let Some(parent) = entry.entry.path.parent() {
+                for (i, ve) in self.visible_entries.iter().enumerate() {
+                    if ve.entry.path == parent {
+                        self.selected = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Cycle through sort orders.
+    pub fn cycle_sort_order(&mut self) {
+        self.sort_order = match self.sort_order {
+            SortOrder::Size => SortOrder::Name,
+            SortOrder::Name => SortOrder::Mtime,
+            SortOrder::Mtime => SortOrder::Size,
+        };
+        self.rebuild_visible_entries();
+        self.status_message = Some(format!("Sort: {:?}", self.sort_order));
+    }
+
+    // Action stubs (will be fully implemented in Tasks 4.14-4.16)
+
+    /// Trigger a rescan of the root directory.
+    pub fn trigger_rescan(&mut self) {
+        self.status_message = Some("Rescan not yet implemented".to_string());
+    }
+
+    /// Delete the selected entry.
+    pub fn delete_selected(&mut self) {
+        self.status_message = Some("Delete not yet implemented".to_string());
+    }
+
+    /// Clean the selected project.
+    pub fn clean_selected(&mut self) {
+        self.status_message = Some("Clean not yet implemented".to_string());
+    }
 }
 
 #[cfg(test)]
