@@ -175,3 +175,35 @@ fn test_nested_tree_snapshot() {
     let output = render_to_string(&app, 80, 24);
     assert_snapshot!(output);
 }
+
+#[test]
+fn test_project_indicator_snapshot() {
+    let mut app = App::new(PathBuf::from("/projects"));
+
+    let mut root = DirEntry::new_dir(PathBuf::from("/projects"), None);
+
+    // Simulate project directories with project_type set manually in visible_entries
+    // (since we can't create actual Cargo.toml files for the snapshot test)
+    let rust_proj = DirEntry::new_dir(PathBuf::from("/projects/my-rust-app"), None);
+    let node_proj = DirEntry::new_dir(PathBuf::from("/projects/my-node-app"), None);
+    let plain_dir = DirEntry::new_dir(PathBuf::from("/projects/documents"), None);
+
+    root.children.push(rust_proj);
+    root.children.push(node_proj);
+    root.children.push(plain_dir);
+    root.recalculate_totals();
+
+    app.tree = Some(root);
+    app.expanded.insert(PathBuf::from("/projects"));
+    app.rebuild_visible_entries();
+
+    // Manually set project types for the test (simulating detected projects)
+    if app.visible_entries.len() >= 4 {
+        app.visible_entries[1].project_type = Some("Rust".to_string());
+        app.visible_entries[2].project_type = Some("npm".to_string());
+        // visible_entries[3] is "documents" with no project type
+    }
+
+    let output = render_to_string(&app, 80, 24);
+    assert_snapshot!(output);
+}

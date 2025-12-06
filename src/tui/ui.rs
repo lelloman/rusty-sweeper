@@ -154,9 +154,16 @@ fn render_entry(
     // Size text
     let size_str = humansize::format_size(entry.entry.size, humansize::BINARY);
 
+    // Project type indicator (e.g., "[Rust]")
+    let project_indicator = entry
+        .project_type
+        .as_ref()
+        .map(|t| format!(" [{}]", t))
+        .unwrap_or_default();
+
     // Calculate available width for name
     let prefix_len = indent.len() + icon.len();
-    let suffix_len = bar.len() + size_str.len() + 2;
+    let suffix_len = bar.len() + size_str.len() + 2 + project_indicator.len();
     let name_width = (width as usize).saturating_sub(prefix_len + suffix_len);
 
     // Truncate name if needed
@@ -169,7 +176,7 @@ fn render_entry(
 
     // Build the line
     let padding = " ".repeat(name_width.saturating_sub(display_name.len()));
-    let line = format!("{}{}{}{} {} {}", indent, icon, display_name, padding, bar, size_str);
+    let line = format!("{}{}{}{}{} {} {}", indent, icon, display_name, project_indicator, padding, bar, size_str);
 
     // Truncate to fit width
     let line: String = line.chars().take(width as usize).collect();

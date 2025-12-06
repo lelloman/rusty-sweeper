@@ -53,6 +53,8 @@ pub struct VisibleEntry {
     pub depth: usize,
     /// Whether this directory is expanded.
     pub is_expanded: bool,
+    /// Project type display name, if this is a detected project.
+    pub project_type: Option<String>,
 }
 
 /// Delete a file or directory.
@@ -73,6 +75,24 @@ fn dir_size(path: &Path) -> u64 {
         .filter_map(|e| e.metadata().ok())
         .map(|m| m.len())
         .sum()
+}
+
+/// Detect project type at the given path.
+/// Returns the short display name (e.g., "Rust", "Node") if detected.
+fn detect_project_type(path: &Path) -> Option<String> {
+    let registry = DetectorRegistry::new();
+    for detector in registry.detectors() {
+        if detector.detect(path) {
+            // Extract short name from display_name (e.g., "Rust/Cargo" -> "Rust")
+            let display_name = detector.display_name();
+            let short_name = display_name
+                .split('/')
+                .next()
+                .unwrap_or(display_name);
+            return Some(short_name.to_string());
+        }
+    }
+    None
 }
 
 /// Main application state for the TUI.
@@ -170,10 +190,18 @@ impl App {
 
         let is_expanded = self.expanded.contains(&entry.path);
 
+        // Detect project type for directories
+        let project_type = if entry.is_dir {
+            detect_project_type(&entry.path)
+        } else {
+            None
+        };
+
         self.visible_entries.push(VisibleEntry {
             entry: entry.clone(),
             depth,
             is_expanded,
+            project_type,
         });
 
         // If expanded and has children, recurse
@@ -906,6 +934,47 @@ mod tests {
         app.rebuild_visible_entries();
 
         assert!(!app.selected_is_project());
+    }
+
+    #[test]
+    fn test_detect_project_type_cargo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let project_type = detect_project_type(temp_dir.path());
+        assert_eq!(project_type, Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn test_detect_project_type_npm() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("package.json"), "{}").unwrap();
+
+        let project_type = detect_project_type(temp_dir.path());
+        assert_eq!(project_type, Some("npm".to_string()));
+    }
+
+    #[test]
+    fn test_detect_project_type_none() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let project_type = detect_project_type(temp_dir.path());
+        assert!(project_type.is_none());
+    }
+
+    #[test]
+    fn test_visible_entry_has_project_type() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        assert!(app.visible_entries[0].project_type.is_some());
+        assert_eq!(app.visible_entries[0].project_type, Some("Rust".to_string()));
     }
 
     #[test]
