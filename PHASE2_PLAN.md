@@ -88,7 +88,7 @@ mod tests {
 
 ---
 
-#### [ ] Task 2.1.2: Implement `DirEntry` helper methods
+#### [x] Task 2.1.2: Implement `DirEntry` helper methods
 
 **Description**: Add utility methods for creating entries, calculating totals, and sorting children.
 
@@ -1803,7 +1803,7 @@ criterion_main!(benches);
 | Task | Description | Status |
 |------|-------------|--------|
 | 2.1.1 | Define `DirEntry` struct | [x] |
-| 2.1.2 | Implement `DirEntry` helper methods | [ ] |
+| 2.1.2 | Implement `DirEntry` helper methods | [x] |
 | 2.1.3 | Define `ScanOptions` struct | [ ] |
 | 2.2.1 | Create scanner module hierarchy | [ ] |
 | 2.3.1 | Implement file size utilities | [ ] |
