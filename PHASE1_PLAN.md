@@ -937,7 +937,7 @@ fn init_logging(verbosity: u8, quiet: bool) {
 
 ### Task 4.3: Add CLI Integration Tests
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Create integration tests that invoke the binary and verify behavior.
 
@@ -1116,7 +1116,7 @@ pub use error::{Result, SweeperError};
 | 3.4 | Config Integration Test | `[x]` |
 | 4.1 | Define CLI Structure | `[x]` |
 | 4.2 | Implement Main Entry Point | `[x]` |
-| 4.3 | CLI Integration Tests | `[ ]` |
+| 4.3 | CLI Integration Tests | `[x]` |
 | 5.1 | Configure Tracing | `[x]` |
 | 6.1 | Create Library Root | `[ ]` |
 
