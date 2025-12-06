@@ -500,7 +500,7 @@ mod tests {
 
 ### 2.4 Directory Walking
 
-#### [ ] Task 2.4.1: Implement basic directory walker
+#### [x] Task 2.4.1: Implement basic directory walker
 
 **Description**: Create a synchronous directory walker using `walkdir`.
 
@@ -1807,7 +1807,7 @@ criterion_main!(benches);
 | 2.1.3 | Define `ScanOptions` struct | [x] |
 | 2.2.1 | Create scanner module hierarchy | [x] |
 | 2.3.1 | Implement file size utilities | [x] |
-| 2.4.1 | Implement basic directory walker | [ ] |
+| 2.4.1 | Implement basic directory walker | [x] |
 | 2.4.2 | Implement parallel directory walker | [ ] |
 | 2.5.1 | Implement tree formatter | [ ] |
 | 2.5.2 | Implement JSON formatter | [ ] |
