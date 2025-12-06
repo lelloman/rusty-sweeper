@@ -1124,7 +1124,7 @@ fn test_tree_renders_entries() {
 
 ## Task 4.11: Implement Search Overlay
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -1197,7 +1197,7 @@ fn test_search_overlay_shows_query() {
 
 ## Task 4.12: Implement Confirmation Dialog
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -1290,7 +1290,7 @@ fn test_delete_dialog_shows_path() {
 
 ## Task 4.13: Implement Help Overlay
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2230,9 +2230,9 @@ fn test_very_long_path() {
 | 4.8 | Basic UI layout | `[x]` |
 | 4.9 | Tree widget | `[x]` |
 | 4.10 | Integrate tree widget | `[x]` |
-| 4.11 | Search overlay | `[ ]` |
-| 4.12 | Confirmation dialog | `[ ]` |
-| 4.13 | Help overlay | `[ ]` |
+| 4.11 | Search overlay | `[x]` |
+| 4.12 | Confirmation dialog | `[x]` |
+| 4.13 | Help overlay | `[x]` |
 | 4.14 | Delete action | `[ ]` |
 | 4.15 | Clean action | `[ ]` |
 | 4.16 | Rescan functionality | `[ ]` |

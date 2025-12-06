@@ -2,10 +2,10 @@
 
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use super::app::{App, Mode};
+use super::app::{App, ConfirmAction, Mode};
 
 /// Render the entire UI.
 pub fn render(app: &App, frame: &mut Frame) {
@@ -21,6 +21,14 @@ pub fn render(app: &App, frame: &mut Frame) {
     render_header(app, frame, chunks[0]);
     render_tree_area(app, frame, chunks[1]);
     render_footer(app, frame, chunks[2]);
+
+    // Render overlays based on mode
+    match app.mode {
+        Mode::Search => render_search_overlay(app, frame),
+        Mode::Confirm(action) => render_confirm_dialog(app, frame, action),
+        Mode::Help => render_help_overlay(frame),
+        Mode::Normal => {}
+    }
 }
 
 fn render_header(app: &App, frame: &mut Frame, area: Rect) {
@@ -202,6 +210,163 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+fn render_search_overlay(app: &App, frame: &mut Frame) {
+    let area = frame.area();
+
+    // Position at bottom, above footer
+    let search_area = Rect {
+        x: 2,
+        y: area.height.saturating_sub(6),
+        width: area.width.saturating_sub(4).min(60),
+        height: 3,
+    };
+
+    // Clear background
+    frame.render_widget(Clear, search_area);
+
+    let block = Block::default()
+        .title(" Search ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let input = format!("/{}", app.search_query);
+
+    let paragraph = Paragraph::new(input)
+        .block(block)
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(paragraph, search_area);
+
+    // Show cursor position
+    frame.set_cursor_position(Position::new(
+        search_area.x + app.search_query.len() as u16 + 2, // +2 for border and /
+        search_area.y + 1,
+    ));
+}
+
+fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
+    let area = frame.area();
+
+    // Center the dialog
+    let dialog_width = 50u16.min(area.width.saturating_sub(4));
+    let dialog_height = 7u16;
+    let dialog_area = Rect {
+        x: (area.width.saturating_sub(dialog_width)) / 2,
+        y: (area.height.saturating_sub(dialog_height)) / 2,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Clear background
+    frame.render_widget(Clear, dialog_area);
+
+    let (title, message) = match action {
+        ConfirmAction::Delete => {
+            let path = app
+                .selected_entry()
+                .map(|e| {
+                    let p = e.entry.path.display().to_string();
+                    if p.len() > 35 {
+                        format!("...{}", &p[p.len() - 32..])
+                    } else {
+                        p
+                    }
+                })
+                .unwrap_or_default();
+            let size = app
+                .selected_entry()
+                .map(|e| humansize::format_size(e.entry.size, humansize::BINARY))
+                .unwrap_or_default();
+            (
+                " Delete ",
+                format!("Delete '{}'?\n\nSize: {}\n\n[y]es  [n]o", path, size),
+            )
+        }
+        ConfirmAction::Clean => {
+            let path = app
+                .selected_entry()
+                .map(|e| {
+                    let p = e.entry.path.display().to_string();
+                    if p.len() > 35 {
+                        format!("...{}", &p[p.len() - 32..])
+                    } else {
+                        p
+                    }
+                })
+                .unwrap_or_default();
+            (
+                " Clean Project ",
+                format!("Clean build artifacts in\n'{}'?\n\n[y]es  [n]o", path),
+            )
+        }
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(message)
+        .block(block)
+        .style(Style::default().fg(Color::White))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, dialog_area);
+}
+
+fn render_help_overlay(frame: &mut Frame) {
+    let area = frame.area();
+
+    // Near full-screen overlay
+    let help_width = 60u16.min(area.width.saturating_sub(8));
+    let help_height = 22u16.min(area.height.saturating_sub(4));
+    let help_area = Rect {
+        x: (area.width.saturating_sub(help_width)) / 2,
+        y: (area.height.saturating_sub(help_height)) / 2,
+        width: help_width,
+        height: help_height,
+    };
+
+    frame.render_widget(Clear, help_area);
+
+    let help_text = r#"
+ NAVIGATION
+ ─────────────────────────────────
+ ↑/k        Move up
+ ↓/j        Move down
+ →/l/Enter  Expand directory
+ ←/h/Bksp   Collapse / Go to parent
+ Space      Toggle expand/collapse
+ g          Go to top
+ G          Go to bottom
+
+ ACTIONS
+ ─────────────────────────────────
+ d          Delete selected
+ c          Clean project artifacts
+ r          Refresh / Rescan
+
+ VIEW
+ ─────────────────────────────────
+ /          Search / Filter
+ s          Cycle sort order
+ .          Toggle hidden files
+ ?          Toggle this help
+ q/Esc      Quit
+"#;
+
+    let block = Block::default()
+        .title(" Help ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(help_text)
+        .block(block)
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(paragraph, help_area);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +413,40 @@ mod tests {
         // At the bottom
         let offset = calculate_scroll_offset(99, 10, 100);
         assert_eq!(offset, 90); // 100 - 10 = 90
+    }
+
+    #[test]
+    fn test_render_search_overlay() {
+        let mut app = App::new(PathBuf::from("/"));
+        app.mode = Mode::Search;
+        app.search_query = "test".to_string();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn test_render_confirm_dialog() {
+        use crate::scanner::DirEntry;
+
+        let mut app = App::new(PathBuf::from("/test"));
+        app.tree = Some(DirEntry::new_dir(PathBuf::from("/test"), None));
+        app.rebuild_visible_entries();
+        app.mode = Mode::Confirm(ConfirmAction::Delete);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn test_render_help_overlay() {
+        let mut app = App::new(PathBuf::from("/"));
+        app.mode = Mode::Help;
+
+        let backend = TestBackend::new(80, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
     }
 }
