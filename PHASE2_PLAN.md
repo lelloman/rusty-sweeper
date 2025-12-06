@@ -389,7 +389,7 @@ pub use scanner::{DirEntry, ScanOptions, scan_directory};
 
 ### 2.3 Size Calculation
 
-#### [ ] Task 2.3.1: Implement file size utilities
+#### [x] Task 2.3.1: Implement file size utilities
 
 **Description**: Create functions to get file size and disk usage from metadata.
 
@@ -1806,7 +1806,7 @@ criterion_main!(benches);
 | 2.1.2 | Implement `DirEntry` helper methods | [x] |
 | 2.1.3 | Define `ScanOptions` struct | [x] |
 | 2.2.1 | Create scanner module hierarchy | [x] |
-| 2.3.1 | Implement file size utilities | [ ] |
+| 2.3.1 | Implement file size utilities | [x] |
 | 2.4.1 | Implement basic directory walker | [ ] |
 | 2.4.2 | Implement parallel directory walker | [ ] |
 | 2.5.1 | Implement tree formatter | [ ] |
