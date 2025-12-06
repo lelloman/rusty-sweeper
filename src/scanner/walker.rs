@@ -59,6 +59,11 @@ pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
 
         let path = entry.path().to_path_buf();
 
+        // Skip Linux virtual filesystem paths
+        if ScanOptions::is_linux_virtual_fs(&path) {
+            continue;
+        }
+
         // Skip hidden files if not requested
         if !options.include_hidden {
             if let Some(name) = path.file_name() {
@@ -164,6 +169,11 @@ fn scan_dir_recursive_parallel(
 ) -> Result<DirEntry> {
     use rayon::prelude::*;
 
+    // Skip Linux virtual filesystem paths
+    if ScanOptions::is_linux_virtual_fs(path) {
+        return Ok(DirEntry::new_dir(path.to_path_buf(), None));
+    }
+
     let metadata = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) => return Ok(DirEntry::new_error(path.to_path_buf(), e.to_string())),
@@ -195,9 +205,14 @@ fn scan_dir_recursive_parallel(
     let entries: Vec<_> = read_dir
         .filter_map(|e| e.ok())
         .filter(|e| {
+            let child_path = e.path();
+            // Filter out Linux virtual filesystem paths
+            if ScanOptions::is_linux_virtual_fs(&child_path) {
+                return false;
+            }
             // Filter hidden files if needed
             if !options.include_hidden {
-                if let Some(name) = e.path().file_name() {
+                if let Some(name) = child_path.file_name() {
                     if name.to_string_lossy().starts_with('.') {
                         return false;
                     }
