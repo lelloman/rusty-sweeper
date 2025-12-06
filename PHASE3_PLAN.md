@@ -1831,7 +1831,7 @@ mod tests {
 
 ## Task 10: Integration Tests
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2078,7 +2078,7 @@ fn test_max_depth_limiting() {
 | 7 | Parallel orchestrator | `[x]` |
 | 8 | CLI subcommand | `[x]` |
 | 9 | Age filtering | `[x]` |
-| 10 | Integration tests | `[ ]` |
+| 10 | Integration tests | `[x]` |
 
 **Total estimated complexity**: Medium-High
 
