@@ -296,7 +296,9 @@ impl App {
     pub fn trigger_rescan(&mut self) {
         self.scanning = true;
 
-        match scan_directory(&self.root, &ScanOptions::default()) {
+        // Always scan with hidden files included so we can toggle visibility in the UI
+        let options = ScanOptions::default().with_hidden(true);
+        match scan_directory(&self.root, &options) {
             Ok(tree) => {
                 // Preserve expanded paths that still exist
                 let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();

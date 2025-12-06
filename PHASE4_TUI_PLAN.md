@@ -1723,7 +1723,7 @@ cargo run -- tui /tmp
 
 ## Task 4.19: Add Integration Tests
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
