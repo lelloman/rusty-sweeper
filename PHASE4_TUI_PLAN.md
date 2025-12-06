@@ -1683,7 +1683,7 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
 
 ## Task 4.18: Wire Up CLI Subcommand
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

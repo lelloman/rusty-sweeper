@@ -33,8 +33,8 @@ fn main() -> Result<()> {
         }
         Command::Tui(args) => {
             tracing::info!(?args, "Starting TUI");
-            println!("TUI command not yet implemented");
-            // TODO: Phase 4
+            let root = args.path.canonicalize()?;
+            rusty_sweeper::tui::run(root)?;
         }
     }
 

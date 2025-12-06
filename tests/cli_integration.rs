@@ -127,11 +127,6 @@ fn monitor_prints_not_implemented() {
         .stdout(predicate::str::contains("not yet implemented"));
 }
 
-#[test]
-fn tui_prints_not_implemented() {
-    rusty_sweeper()
-        .args(["tui", "."])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("not yet implemented"));
-}
+// Note: TUI command is implemented but can't be tested in CI
+// because it requires a real terminal. The tui_subcommand_help test
+// above verifies the command is recognized.
