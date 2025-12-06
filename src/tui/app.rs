@@ -8,7 +8,7 @@ use crate::cleaner::{
     CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
 };
 use walkdir::WalkDir;
-use crate::scanner::DirEntry;
+use crate::scanner::{scan_directory, DirEntry, ScanOptions};
 
 /// The current UI mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,9 +294,35 @@ impl App {
 
     /// Trigger a rescan of the root directory.
     pub fn trigger_rescan(&mut self) {
-        // TODO: Implement actual rescan in Task 4.16
-        // For now, just set scanning flag - don't overwrite existing status message
         self.scanning = true;
+
+        match scan_directory(&self.root, &ScanOptions::default()) {
+            Ok(tree) => {
+                // Preserve expanded paths that still exist
+                let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();
+                self.expanded.clear();
+
+                for path in old_expanded {
+                    if path.exists() {
+                        self.expanded.insert(path);
+                    }
+                }
+
+                self.tree = Some(tree);
+                self.rebuild_visible_entries();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Scan error: {}", e));
+            }
+        }
+
+        self.scanning = false;
+    }
+
+    /// Perform initial scan, expanding root by default.
+    pub fn initial_scan(&mut self) {
+        self.expanded.insert(self.root.clone());
+        self.trigger_rescan();
     }
 
     /// Delete the selected entry.
@@ -890,5 +916,83 @@ mod tests {
 
         let size = dir_size(&subdir);
         assert_eq!(size, 300);
+    }
+
+    // Rescan tests
+
+    #[test]
+    fn test_trigger_rescan() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "test").unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        assert!(app.tree.is_none());
+
+        app.trigger_rescan();
+
+        assert!(app.tree.is_some());
+        assert!(!app.scanning);
+    }
+
+    #[test]
+    fn test_rescan_preserves_expansion() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+        fs::write(sub_dir.join("file.txt"), "test").unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.expanded.insert(sub_dir.clone());
+
+        app.trigger_rescan();
+
+        assert!(app.expanded.contains(&sub_dir));
+    }
+
+    #[test]
+    fn test_rescan_removes_deleted_expansion() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.expanded.insert(sub_dir.clone());
+
+        // Delete the directory
+        fs::remove_dir(&sub_dir).unwrap();
+
+        app.trigger_rescan();
+
+        // Expansion for deleted directory should be removed
+        assert!(!app.expanded.contains(&sub_dir));
+    }
+
+    #[test]
+    fn test_initial_scan() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "test").unwrap();
+        let sub_dir = temp_dir.path().join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+
+        app.initial_scan();
+
+        assert!(app.tree.is_some());
+        // Root should be expanded by default
+        assert!(app.expanded.contains(&temp_dir.path().to_path_buf()));
+        // Visible entries should include root and its children
+        assert!(app.visible_entries.len() > 1);
+    }
+
+    #[test]
+    fn test_rescan_nonexistent_directory() {
+        let mut app = App::new(PathBuf::from("/nonexistent/path/that/does/not/exist"));
+
+        app.trigger_rescan();
+
+        // Should have an error status message
+        assert!(app.status_message.is_some());
+        assert!(app.status_message.as_ref().unwrap().contains("Scan error"));
     }
 }
