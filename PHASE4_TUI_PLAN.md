@@ -1933,7 +1933,7 @@ cargo insta review
 
 ## Task 4.21: Add Project Indicator to Tree
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -1991,7 +1991,7 @@ fn test_project_indicator_shown() {
 
 ## Task 4.22: Add Disk Usage to Header
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2052,7 +2052,7 @@ fn test_disk_usage_percent() {
 
 ## Task 4.23: Add Color Coding by Size
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2120,7 +2120,7 @@ fn test_size_color_gradient() {
 
 ## Task 4.24: Polish and Edge Cases
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2234,15 +2234,15 @@ fn test_very_long_path() {
 | 4.12 | Confirmation dialog | `[x]` |
 | 4.13 | Help overlay | `[x]` |
 | 4.14 | Delete action | `[x]` |
-| 4.15 | Clean action | `[ ]` |
-| 4.16 | Rescan functionality | `[ ]` |
-| 4.17 | Main TUI loop | `[ ]` |
-| 4.18 | Wire up CLI | `[ ]` |
-| 4.19 | Integration tests | `[ ]` |
-| 4.20 | Snapshot tests | `[ ]` |
-| 4.21 | Project indicator | `[ ]` |
-| 4.22 | Disk usage header | `[ ]` |
-| 4.23 | Size color coding | `[ ]` |
-| 4.24 | Polish and edge cases | `[ ]` |
+| 4.15 | Clean action | `[x]` |
+| 4.16 | Rescan functionality | `[x]` |
+| 4.17 | Main TUI loop | `[x]` |
+| 4.18 | Wire up CLI | `[x]` |
+| 4.19 | Integration tests | `[x]` |
+| 4.20 | Snapshot tests | `[x]` |
+| 4.21 | Project indicator | `[x]` |
+| 4.22 | Disk usage header | `[x]` |
+| 4.23 | Size color coding | `[x]` |
+| 4.24 | Polish and edge cases | `[x]` |
 
 **Total: 24 tasks**
