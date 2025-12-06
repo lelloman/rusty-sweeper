@@ -96,7 +96,7 @@ pub use app::App;
 
 ## Task 4.3: Implement Terminal Setup/Teardown
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2222,7 +2222,7 @@ fn test_very_long_path() {
 |------|-------------|--------|
 | 4.1 | Add TUI dependencies | `[x]` |
 | 4.2 | Create module structure | `[x]` |
-| 4.3 | Terminal setup/teardown | `[ ]` |
+| 4.3 | Terminal setup/teardown | `[x]` |
 | 4.4 | Define application state | `[ ]` |
 | 4.5 | Tree flattening logic | `[ ]` |
 | 4.6 | Event handling | `[ ]` |
