@@ -11,6 +11,7 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod scanner;
+pub mod tui;
 
 // Re-export commonly used types
 pub use config::Config;
