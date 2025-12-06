@@ -248,7 +248,7 @@ mod tests {
 
 ## Task 3: Remaining Detector Implementations
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2071,7 +2071,7 @@ fn test_max_depth_limiting() {
 |------|-------------|--------|
 | 1 | ProjectDetector trait | `[x]` |
 | 2 | Cargo detector | `[x]` |
-| 3 | Remaining detectors (8) | `[ ]` |
+| 3 | Remaining detectors (8) | `[x]` |
 | 4 | Detector registry | `[ ]` |
 | 5 | Project scanner | `[ ]` |
 | 6 | Clean executor | `[ ]` |
