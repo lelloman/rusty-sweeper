@@ -1849,7 +1849,7 @@ cargo test --test tui_integration
 
 ## Task 4.20: Add Snapshot Tests
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

@@ -44,6 +44,7 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 criterion = "0.5"
+insta = "1.40"
 
 [[bench]]
 name = "scanner_bench"
