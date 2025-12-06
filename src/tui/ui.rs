@@ -39,7 +39,23 @@ fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         .map(|t| humansize::format_size(t.size, humansize::BINARY))
         .unwrap_or_else(|| "...".to_string());
 
-    let header_text = format!(" {}  {}", path_display, size_display);
+    // Get disk usage info
+    let disk_info = app.get_disk_usage().map(|(total, used, avail)| {
+        let total_str = humansize::format_size(total, humansize::BINARY);
+        let used_str = humansize::format_size(used, humansize::BINARY);
+        let avail_str = humansize::format_size(avail, humansize::BINARY);
+        let percent = if total > 0 {
+            (used as f64 / total as f64 * 100.0) as u32
+        } else {
+            0
+        };
+        format!("Disk: {} / {} ({}% used, {} free)", used_str, total_str, percent, avail_str)
+    });
+
+    let header_text = match disk_info {
+        Some(disk) => format!(" {}  {}  │  {}", path_display, size_display, disk),
+        None => format!(" {}  {}", path_display, size_display),
+    };
 
     let title = " Rusty Sweeper ";
 

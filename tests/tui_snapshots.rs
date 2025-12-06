@@ -145,13 +145,14 @@ fn test_status_message_snapshot() {
 
 #[test]
 fn test_nested_tree_snapshot() {
-    let mut app = App::new(PathBuf::from("/root"));
+    // Use a non-existent path to avoid showing real disk usage in snapshots
+    let mut app = App::new(PathBuf::from("/nonexistent/snapshot/path"));
 
-    let mut root = DirEntry::new_dir(PathBuf::from("/root"), None);
+    let mut root = DirEntry::new_dir(PathBuf::from("/nonexistent/snapshot/path"), None);
 
-    let mut subdir = DirEntry::new_dir(PathBuf::from("/root/subdir"), None);
+    let mut subdir = DirEntry::new_dir(PathBuf::from("/nonexistent/snapshot/path/subdir"), None);
     subdir.children.push(DirEntry::new_file(
-        PathBuf::from("/root/subdir/nested.txt"),
+        PathBuf::from("/nonexistent/snapshot/path/subdir/nested.txt"),
         512,
         4096,
         None,
@@ -160,7 +161,7 @@ fn test_nested_tree_snapshot() {
 
     root.children.push(subdir);
     root.children.push(DirEntry::new_file(
-        PathBuf::from("/root/top.txt"),
+        PathBuf::from("/nonexistent/snapshot/path/top.txt"),
         256,
         4096,
         None,
@@ -168,8 +169,8 @@ fn test_nested_tree_snapshot() {
     root.recalculate_totals();
 
     app.tree = Some(root);
-    app.expanded.insert(PathBuf::from("/root"));
-    app.expanded.insert(PathBuf::from("/root/subdir"));
+    app.expanded.insert(PathBuf::from("/nonexistent/snapshot/path"));
+    app.expanded.insert(PathBuf::from("/nonexistent/snapshot/path/subdir"));
     app.rebuild_visible_entries();
 
     let output = render_to_string(&app, 80, 24);

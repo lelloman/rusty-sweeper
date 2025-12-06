@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use nix::sys::statvfs::statvfs;
+
 use crate::cleaner::{
     CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
 };
@@ -451,6 +453,37 @@ impl App {
         } else {
             false
         }
+    }
+
+    /// Get filesystem disk usage information.
+    /// Returns (total_bytes, used_bytes, available_bytes) or None if unavailable.
+    pub fn get_disk_usage(&self) -> Option<(u64, u64, u64)> {
+        // Only get disk usage if the root path actually exists
+        if !self.root.exists() {
+            return None;
+        }
+
+        match statvfs(&self.root) {
+            Ok(stat) => {
+                let block_size = stat.fragment_size();
+                let total = stat.blocks() * block_size;
+                let available = stat.blocks_available() * block_size;
+                let used = total.saturating_sub(available);
+                Some((total, used, available))
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Get disk usage as a percentage.
+    pub fn get_disk_usage_percent(&self) -> Option<f32> {
+        self.get_disk_usage().map(|(total, used, _)| {
+            if total > 0 {
+                (used as f64 / total as f64 * 100.0) as f32
+            } else {
+                0.0
+            }
+        })
     }
 }
 
@@ -975,6 +1008,39 @@ mod tests {
 
         assert!(app.visible_entries[0].project_type.is_some());
         assert_eq!(app.visible_entries[0].project_type, Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn test_get_disk_usage() {
+        let app = App::new(PathBuf::from("/"));
+        let usage = app.get_disk_usage();
+
+        // Should succeed for root filesystem
+        assert!(usage.is_some());
+        let (total, used, avail) = usage.unwrap();
+        assert!(total > 0);
+        assert!(used <= total);
+        assert!(used + avail >= total * 9 / 10); // Allow some margin for rounding
+    }
+
+    #[test]
+    fn test_get_disk_usage_percent() {
+        let app = App::new(PathBuf::from("/"));
+        let percent = app.get_disk_usage_percent();
+
+        assert!(percent.is_some());
+        let p = percent.unwrap();
+        assert!(p >= 0.0);
+        assert!(p <= 100.0);
+    }
+
+    #[test]
+    fn test_get_disk_usage_nonexistent_path() {
+        let app = App::new(PathBuf::from("/nonexistent/path/that/does/not/exist"));
+        let usage = app.get_disk_usage();
+
+        // Should return None for nonexistent path
+        assert!(usage.is_none());
     }
 
     #[test]
