@@ -850,7 +850,7 @@ mod tests {
 
 ### Task 4.2: Implement Main Entry Point
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Create the main entry point that parses CLI args, loads config, and dispatches to subcommands.
 
@@ -1039,7 +1039,7 @@ fn invalid_config_path_fails() {
 
 ### Task 5.1: Configure Tracing Subscriber
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Set up the tracing subscriber with appropriate formatting and filtering.
 
@@ -1115,9 +1115,9 @@ pub use error::{Result, SweeperError};
 | 3.3 | Implement Config File Loading | `[x]` |
 | 3.4 | Config Integration Test | `[x]` |
 | 4.1 | Define CLI Structure | `[x]` |
-| 4.2 | Implement Main Entry Point | `[ ]` |
+| 4.2 | Implement Main Entry Point | `[x]` |
 | 4.3 | CLI Integration Tests | `[ ]` |
-| 5.1 | Configure Tracing | `[ ]` |
+| 5.1 | Configure Tracing | `[x]` |
 | 6.1 | Create Library Root | `[ ]` |
 
 ---

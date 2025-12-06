@@ -1,3 +1,66 @@
-fn main() {
-    println!("Hello, world!");
+use anyhow::Result;
+use clap::Parser;
+
+use rusty_sweeper::cli::{Cli, Command};
+use rusty_sweeper::config::Config;
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Initialize logging based on verbosity
+    init_logging(cli.verbose, cli.quiet);
+
+    // Load configuration
+    let config = Config::load(cli.config.as_deref())?;
+
+    tracing::debug!(?config, "Loaded configuration");
+
+    // Dispatch to subcommand
+    match cli.command {
+        Command::Monitor(args) => {
+            tracing::info!(?args, "Starting monitor");
+            println!("Monitor command not yet implemented");
+            // TODO: Phase 5
+        }
+        Command::Clean(args) => {
+            tracing::info!(?args, "Starting clean");
+            println!("Clean command not yet implemented");
+            // TODO: Phase 3
+        }
+        Command::Scan(args) => {
+            tracing::info!(?args, "Starting scan");
+            println!("Scan command not yet implemented");
+            // TODO: Phase 2
+        }
+        Command::Tui(args) => {
+            tracing::info!(?args, "Starting TUI");
+            println!("TUI command not yet implemented");
+            // TODO: Phase 4
+        }
+    }
+
+    Ok(())
+}
+
+fn init_logging(verbosity: u8, quiet: bool) {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+    let level = if quiet {
+        "warn"
+    } else {
+        match verbosity {
+            0 => "warn",
+            1 => "info",
+            2 => "debug",
+            _ => "trace",
+        }
+    };
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(format!("rusty_sweeper={}", level)));
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_target(false))
+        .with(filter)
+        .init();
 }
