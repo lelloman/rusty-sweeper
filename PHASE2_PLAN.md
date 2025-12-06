@@ -1721,7 +1721,7 @@ tempfile = "3"
 
 ---
 
-#### [ ] Task 2.8.2: Add benchmark tests
+#### [x] Task 2.8.2: Add benchmark tests
 
 **Description**: Performance benchmarks for scanner on various directory sizes.
 
@@ -1815,7 +1815,7 @@ criterion_main!(benches);
 | 2.6.2 | Add progress indicator | [x] |
 | 2.7.1 | Define scanner-specific errors | [x] |
 | 2.8.1 | Create integration test suite | [x] |
-| 2.8.2 | Add benchmark tests | [ ] |
+| 2.8.2 | Add benchmark tests | [x] |
 
 **Legend**: [ ] Not started | [~] In progress | [x] Complete
 

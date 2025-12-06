@@ -36,6 +36,11 @@ indicatif = "0.17"
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
+criterion = "0.5"
+
+[[bench]]
+name = "scanner_bench"
+harness = false
 
 [[bin]]
 name = "rusty-sweeper"
