@@ -1,5 +1,6 @@
+use crate::error::{ConfigError, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Root configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +130,83 @@ impl Default for TuiConfig {
     }
 }
 
+impl Config {
+    /// Load configuration from file, falling back to defaults
+    pub fn load(config_path: Option<&Path>) -> Result<Self> {
+        // If explicit path provided, it must exist
+        if let Some(path) = config_path {
+            return Self::load_from_file(path);
+        }
+
+        // Try XDG config locations
+        if let Some(path) = Self::find_config_file() {
+            return Self::load_from_file(&path);
+        }
+
+        // No config file found, use defaults
+        Ok(Self::default())
+    }
+
+    /// Find config file in standard locations
+    fn find_config_file() -> Option<PathBuf> {
+        // Try XDG_CONFIG_HOME first
+        if let Some(config_dir) = dirs::config_dir() {
+            let path = config_dir.join("rusty-sweeper").join("config.toml");
+            if path.exists() {
+                return Some(path);
+            }
+        }
+
+        // Try system-wide config
+        let system_path = PathBuf::from("/etc/rusty-sweeper/config.toml");
+        if system_path.exists() {
+            return Some(system_path);
+        }
+
+        None
+    }
+
+    /// Load config from a specific file
+    fn load_from_file(path: &Path) -> Result<Self> {
+        let contents = std::fs::read_to_string(path).map_err(|e| ConfigError::ReadError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        let config: Config = toml::from_str(&contents).map_err(|e| ConfigError::ParseError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validate configuration values
+    pub fn validate(&self) -> Result<()> {
+        if self.monitor.warn_threshold > 100 {
+            return Err(ConfigError::Invalid("warn_threshold must be 0-100".to_string()).into());
+        }
+        if self.monitor.critical_threshold > 100 {
+            return Err(
+                ConfigError::Invalid("critical_threshold must be 0-100".to_string()).into(),
+            );
+        }
+        if self.monitor.warn_threshold >= self.monitor.critical_threshold {
+            return Err(ConfigError::Invalid(
+                "warn_threshold must be less than critical_threshold".to_string(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Get the default config file path (for --config help text)
+    pub fn default_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("rusty-sweeper").join("config.toml"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +237,25 @@ mod tests {
         let config = CleanerConfig::default();
         assert!(config.project_types.contains(&"cargo".to_string()));
         assert!(config.project_types.contains(&"npm".to_string()));
+    }
+
+    #[test]
+    fn load_returns_defaults_when_no_file() {
+        let config = Config::load(None).unwrap();
+        assert_eq!(config.monitor.interval, 300);
+    }
+
+    #[test]
+    fn load_fails_on_invalid_explicit_path() {
+        let result = Config::load(Some(Path::new("/nonexistent/config.toml")));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_catches_invalid_thresholds() {
+        let mut config = Config::default();
+        config.monitor.warn_threshold = 95;
+        config.monitor.critical_threshold = 90;
+        assert!(config.validate().is_err());
     }
 }
