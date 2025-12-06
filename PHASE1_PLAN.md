@@ -534,7 +534,7 @@ fn validate_catches_invalid_thresholds() {
 
 ### Task 3.4: Add Config File Parsing Integration Test
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Create integration test that writes a temp config file and verifies parsing.
 
@@ -1113,7 +1113,7 @@ pub use error::{Result, SweeperError};
 | 3.1 | Define Configuration Structures | `[x]` |
 | 3.2 | Implement Default Trait | `[x]` |
 | 3.3 | Implement Config File Loading | `[x]` |
-| 3.4 | Config Integration Test | `[ ]` |
+| 3.4 | Config Integration Test | `[x]` |
 | 4.1 | Define CLI Structure | `[ ]` |
 | 4.2 | Implement Main Entry Point | `[ ]` |
 | 4.3 | CLI Integration Tests | `[ ]` |
