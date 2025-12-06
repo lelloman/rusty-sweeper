@@ -8,12 +8,45 @@ pub mod widgets;
 pub use app::App;
 
 use std::io::{self, stdout, Stdout};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use event::handle_events;
+use ui::render;
 
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
+
+/// Run the TUI application.
+///
+/// This is the main entry point for the TUI. It initializes the terminal,
+/// performs an initial scan, and enters the main event loop.
+pub fn run(root: PathBuf) -> anyhow::Result<()> {
+    // Setup
+    install_panic_hook();
+    let mut terminal = init_terminal()?;
+
+    // Initialize app
+    let mut app = App::new(root);
+    app.initial_scan();
+
+    // Main loop
+    while !app.should_quit {
+        // Render
+        terminal.draw(|frame| render(&app, frame))?;
+
+        // Handle events (with 100ms timeout for responsive UI)
+        handle_events(&mut app, Duration::from_millis(100))?;
+    }
+
+    // Cleanup
+    restore_terminal()?;
+
+    Ok(())
+}
 
 /// Type alias for our terminal backend.
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;

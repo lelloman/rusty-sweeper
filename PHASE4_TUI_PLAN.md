@@ -1622,7 +1622,7 @@ fn test_rescan_preserves_expansion() {
 
 ## Task 4.17: Implement Main TUI Loop
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
