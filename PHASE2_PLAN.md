@@ -732,7 +732,7 @@ mod tests {
 
 ---
 
-#### [ ] Task 2.4.2: Implement parallel directory walker
+#### [x] Task 2.4.2: Implement parallel directory walker
 
 **Description**: Add parallel scanning using `rayon` for faster performance on large directories.
 
@@ -1808,7 +1808,7 @@ criterion_main!(benches);
 | 2.2.1 | Create scanner module hierarchy | [x] |
 | 2.3.1 | Implement file size utilities | [x] |
 | 2.4.1 | Implement basic directory walker | [x] |
-| 2.4.2 | Implement parallel directory walker | [ ] |
+| 2.4.2 | Implement parallel directory walker | [x] |
 | 2.5.1 | Implement tree formatter | [ ] |
 | 2.5.2 | Implement JSON formatter | [ ] |
 | 2.6.1 | Implement `scan` subcommand handler | [ ] |

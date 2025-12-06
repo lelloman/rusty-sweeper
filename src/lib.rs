@@ -13,4 +13,4 @@ pub mod scanner;
 // Re-export commonly used types
 pub use config::Config;
 pub use error::{Result, SweeperError};
-pub use scanner::{scan_directory, DirEntry, ScanOptions};
+pub use scanner::{scan_directory, scan_directory_parallel, DirEntry, ScanOptions};

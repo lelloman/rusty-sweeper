@@ -147,6 +147,84 @@ fn recalculate_totals_recursive(entry: &mut DirEntry) {
     entry.recalculate_totals();
 }
 
+/// Parallel directory scanner for better performance on large directories
+pub fn scan_directory_parallel(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
+    let root = root.canonicalize().map_err(|e| SweeperError::Io {
+        path: root.to_path_buf(),
+        source: e,
+    })?;
+
+    scan_dir_recursive_parallel(&root, options, 0)
+}
+
+fn scan_dir_recursive_parallel(
+    path: &Path,
+    options: &ScanOptions,
+    depth: usize,
+) -> Result<DirEntry> {
+    use rayon::prelude::*;
+
+    let metadata = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return Ok(DirEntry::new_error(path.to_path_buf(), e.to_string())),
+    };
+
+    // If it's a file, return immediately
+    if !metadata.is_dir() {
+        return Ok(DirEntry::new_file(
+            path.to_path_buf(),
+            apparent_size(&metadata),
+            disk_usage(&metadata),
+            metadata.modified().ok(),
+        ));
+    }
+
+    // Check if we've reached the depth limit - if so, return empty directory
+    if let Some(max_depth) = options.max_depth {
+        if depth >= max_depth {
+            return Ok(DirEntry::new_dir(path.to_path_buf(), metadata.modified().ok()));
+        }
+    }
+
+    // Read directory entries
+    let read_dir = match fs::read_dir(path) {
+        Ok(rd) => rd,
+        Err(e) => return Ok(DirEntry::new_error(path.to_path_buf(), e.to_string())),
+    };
+
+    let entries: Vec<_> = read_dir
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            // Filter hidden files if needed
+            if !options.include_hidden {
+                if let Some(name) = e.path().file_name() {
+                    if name.to_string_lossy().starts_with('.') {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .collect();
+
+    // Process entries in parallel
+    let children: Vec<DirEntry> = entries
+        .par_iter()
+        .filter_map(|entry| {
+            let child_path = entry.path();
+            scan_dir_recursive_parallel(&child_path, options, depth + 1).ok()
+        })
+        .collect();
+
+    // Build directory entry
+    let mut dir_entry = DirEntry::new_dir(path.to_path_buf(), metadata.modified().ok());
+    dir_entry.children = children;
+    dir_entry.recalculate_totals();
+    dir_entry.sort_by_size();
+
+    Ok(dir_entry)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +398,79 @@ mod tests {
         // Subdir should also have combined size
         let subdir = result.children.iter().find(|c| c.name == "subdir").unwrap();
         assert_eq!(subdir.size, 300);
+    }
+
+    // Parallel scanner tests
+
+    #[test]
+    fn test_parallel_scan_basic() {
+        let dir = create_test_structure();
+        let options = ScanOptions::default();
+
+        let result = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        assert!(result.is_dir);
+        assert!(result.size > 0);
+        assert!(result.file_count >= 3);
+    }
+
+    #[test]
+    fn test_parallel_scan_matches_sequential() {
+        let dir = create_test_structure();
+        let options = ScanOptions::new().with_hidden(false);
+
+        let sequential = scan_directory(dir.path(), &options).unwrap();
+        let parallel = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        assert_eq!(sequential.size, parallel.size);
+        assert_eq!(sequential.file_count, parallel.file_count);
+        assert_eq!(sequential.dir_count, parallel.dir_count);
+    }
+
+    #[test]
+    fn test_parallel_scan_excludes_hidden() {
+        let dir = create_test_structure();
+        let options = ScanOptions::new().with_hidden(false);
+
+        let result = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        let has_hidden = result.children.iter().any(|c| c.name == ".hidden");
+        assert!(!has_hidden);
+    }
+
+    #[test]
+    fn test_parallel_scan_max_depth() {
+        let dir = create_test_structure();
+        let options = ScanOptions::new().with_max_depth(1);
+
+        let result = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        let subdir = result.children.iter().find(|c| c.name == "subdir");
+        assert!(subdir.is_some());
+        assert!(subdir.unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn test_parallel_scan_large_structure() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+
+        // Create a larger structure for parallel testing
+        for i in 0..10 {
+            let subdir = root.join(format!("dir{}", i));
+            fs::create_dir(&subdir).unwrap();
+            for j in 0..10 {
+                File::create(subdir.join(format!("file{}.txt", j)))
+                    .unwrap()
+                    .write_all(b"content")
+                    .unwrap();
+            }
+        }
+
+        let options = ScanOptions::default();
+        let result = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        assert_eq!(result.file_count, 100);
+        assert_eq!(result.dir_count, 10);
     }
 }
