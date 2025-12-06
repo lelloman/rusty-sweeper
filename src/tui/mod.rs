@@ -31,7 +31,14 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
 
     // Initialize app
     let mut app = App::new(root);
-    app.initial_scan();
+
+    // Show "Scanning..." before the blocking scan
+    app.scanning = true;
+    app.expanded.insert(app.root.clone());
+    terminal.draw(|frame| render(&app, frame))?;
+
+    // Now perform the actual scan
+    app.trigger_rescan();
 
     // Main loop
     while !app.should_quit {
