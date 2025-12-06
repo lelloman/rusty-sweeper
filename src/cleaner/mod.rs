@@ -8,11 +8,13 @@
 mod detector;
 pub mod detectors;
 mod executor;
+mod orchestrator;
 mod project_scanner;
 mod registry;
 
 pub use detector::{DetectedProject, ProjectDetector};
 pub use detectors::all_detectors;
 pub use executor::{CleanExecutor, CleanOptions, CleanResult};
+pub use orchestrator::{CleanOrchestrator, CleanProgress, CleanSummary};
 pub use project_scanner::{ProjectScanner, ScanOptions};
 pub use registry::DetectorRegistry;
