@@ -641,7 +641,7 @@ mod tests {
 
 ## Task 5: Project Scanner
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2073,7 +2073,7 @@ fn test_max_depth_limiting() {
 | 2 | Cargo detector | `[x]` |
 | 3 | Remaining detectors (8) | `[x]` |
 | 4 | Detector registry | `[x]` |
-| 5 | Project scanner | `[ ]` |
+| 5 | Project scanner | `[x]` |
 | 6 | Clean executor | `[ ]` |
 | 7 | Parallel orchestrator | `[ ]` |
 | 8 | CLI subcommand | `[ ]` |
