@@ -1699,7 +1699,7 @@ mod tests {
 
 ## Task 9: Age Filtering
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2077,7 +2077,7 @@ fn test_max_depth_limiting() {
 | 6 | Clean executor | `[x]` |
 | 7 | Parallel orchestrator | `[x]` |
 | 8 | CLI subcommand | `[x]` |
-| 9 | Age filtering | `[ ]` |
+| 9 | Age filtering | `[x]` |
 | 10 | Integration tests | `[ ]` |
 
 **Total estimated complexity**: Medium-High

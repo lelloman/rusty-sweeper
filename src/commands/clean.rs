@@ -50,7 +50,20 @@ pub fn run(args: CleanArgs) -> Result<()> {
 
     // Scan for projects
     println!("Scanning for projects in {}...", path.display());
-    let projects = scanner.scan(&path);
+    let mut projects = scanner.scan(&path);
+
+    // Apply age filter if specified
+    if let Some(age_days) = args.age {
+        let before_count = projects.len();
+        projects = ProjectScanner::filter_by_age(projects, age_days as u64);
+        if before_count > 0 && projects.is_empty() {
+            println!(
+                "Found {} project(s), but none older than {} days.",
+                before_count, age_days
+            );
+            return Ok(());
+        }
+    }
 
     if projects.is_empty() {
         println!("No projects with cleanable artifacts found.");

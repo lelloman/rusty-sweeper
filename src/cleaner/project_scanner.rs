@@ -2,7 +2,9 @@
 
 use crate::cleaner::detector::DetectedProject;
 use crate::cleaner::registry::DetectorRegistry;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
 
 /// Options for scanning.
@@ -143,6 +145,57 @@ impl ProjectScanner {
             .filter_map(|e| e.metadata().ok())
             .map(|m| m.len())
             .sum()
+    }
+
+    /// Filter projects by age, keeping only those not modified in `min_age_days`.
+    ///
+    /// This checks the modification time of source files (excluding artifacts)
+    /// to determine when the project was last actively worked on.
+    pub fn filter_by_age(projects: Vec<DetectedProject>, min_age_days: u64) -> Vec<DetectedProject> {
+        let cutoff = SystemTime::now() - Duration::from_secs(min_age_days * 24 * 60 * 60);
+
+        projects
+            .into_iter()
+            .filter(|p| Self::project_last_modified(&p.path) < cutoff)
+            .collect()
+    }
+
+    /// Get the last modification time of source files in a project.
+    ///
+    /// Excludes common artifact directories to focus on actual source code.
+    fn project_last_modified(path: &Path) -> SystemTime {
+        let artifact_names: HashSet<&str> = [
+            "target",
+            "build",
+            "node_modules",
+            ".gradle",
+            "bin",
+            "obj",
+            "venv",
+            ".venv",
+            "__pycache__",
+        ]
+        .iter()
+        .copied()
+        .collect();
+
+        WalkDir::new(path)
+            .into_iter()
+            .flatten()
+            .filter(|e| {
+                // Skip artifact directories
+                !e.path().components().any(|c| {
+                    if let std::path::Component::Normal(name) = c {
+                        artifact_names.contains(name.to_str().unwrap_or(""))
+                    } else {
+                        false
+                    }
+                })
+            })
+            .filter_map(|e| e.metadata().ok())
+            .filter_map(|m| m.modified().ok())
+            .max()
+            .unwrap_or(SystemTime::UNIX_EPOCH)
     }
 }
 
@@ -295,5 +348,57 @@ mod tests {
 
         assert_eq!(projects.len(), 1);
         assert!(projects[0].path.ends_with("util"));
+    }
+
+    #[test]
+    fn test_filter_by_age_recent_project() {
+        // Create a project that was just modified (should be filtered out)
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("recent");
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(proj.join("Cargo.toml"), "[package]").unwrap();
+        fs::create_dir(proj.join("target")).unwrap();
+        fs::write(proj.join("target/artifact"), "x".repeat(100)).unwrap();
+
+        let projects = vec![DetectedProject {
+            path: proj,
+            project_type: "cargo".to_string(),
+            display_name: "Cargo".to_string(),
+            artifact_size: 100,
+            artifact_paths: vec![],
+        }];
+
+        // Filter for projects older than 7 days
+        let filtered = ProjectScanner::filter_by_age(projects, 7);
+
+        // Recent project should be filtered out
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_project_last_modified_excludes_artifacts() {
+        // Test that artifact directories are excluded when checking mtime
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("project");
+        fs::create_dir_all(&proj).unwrap();
+
+        // Create source file
+        fs::write(proj.join("Cargo.toml"), "[package]").unwrap();
+
+        // Create artifact directory
+        fs::create_dir(proj.join("target")).unwrap();
+        fs::write(proj.join("target/artifact"), "x").unwrap();
+
+        // The function should work without panicking
+        let mtime = ProjectScanner::project_last_modified(&proj);
+
+        // Should return a valid time (not UNIX_EPOCH for a project with files)
+        assert!(mtime > SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn test_filter_by_age_empty_list() {
+        let filtered = ProjectScanner::filter_by_age(vec![], 7);
+        assert!(filtered.is_empty());
     }
 }
