@@ -1,5 +1,10 @@
 //! Scan command implementation
 
+use std::io::IsTerminal;
+use std::time::Duration;
+
+use indicatif::{ProgressBar, ProgressStyle};
+
 use crate::cli::ScanArgs;
 use crate::error::Result;
 use crate::scanner::{
@@ -24,6 +29,24 @@ impl SortOrder {
     }
 }
 
+/// Create a progress spinner for scanning
+fn create_spinner(path: &std::path::Path) -> Option<ProgressBar> {
+    // Only show spinner if stderr is a terminal and we're not in JSON mode
+    if !std::io::stderr().is_terminal() {
+        return None;
+    }
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg}")
+            .expect("valid template"),
+    );
+    pb.set_message(format!("Scanning {}...", path.display()));
+    pb.enable_steady_tick(Duration::from_millis(100));
+    Some(pb)
+}
+
 /// Run the scan command
 pub fn run(args: ScanArgs) -> Result<()> {
     // Build scan options
@@ -37,8 +60,20 @@ pub fn run(args: ScanArgs) -> Result<()> {
 
     tracing::info!(path = %args.path.display(), "Scanning directory");
 
+    // Show progress spinner (only in tree mode with TTY)
+    let spinner = if !args.json {
+        create_spinner(&args.path)
+    } else {
+        None
+    };
+
     // Perform scan
     let mut entry = scan_directory_parallel(&args.path, &scan_options)?;
+
+    // Stop spinner
+    if let Some(pb) = spinner {
+        pb.finish_and_clear();
+    }
 
     // Apply sorting
     let sort_order = SortOrder::from_str(&args.sort);
