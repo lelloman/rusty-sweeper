@@ -1074,7 +1074,7 @@ mod tests {
 
 ### Task 6.1: Create Library Root
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Create `lib.rs` that exports public modules for use by the binary and tests.
 
@@ -1118,7 +1118,7 @@ pub use error::{Result, SweeperError};
 | 4.2 | Implement Main Entry Point | `[x]` |
 | 4.3 | CLI Integration Tests | `[x]` |
 | 5.1 | Configure Tracing | `[x]` |
-| 6.1 | Create Library Root | `[ ]` |
+| 6.1 | Create Library Root | `[x]` |
 
 ---
 
