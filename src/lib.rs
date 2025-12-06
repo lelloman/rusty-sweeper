@@ -8,7 +8,9 @@
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod scanner;
 
 // Re-export commonly used types
 pub use config::Config;
 pub use error::{Result, SweeperError};
+pub use scanner::DirEntry;
