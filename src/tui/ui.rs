@@ -2,6 +2,7 @@
 
 use ratatui::{
     prelude::*,
+    text::Line,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
@@ -136,6 +137,26 @@ fn calculate_scroll_offset(selected: usize, visible_height: usize, total: usize)
     }
 }
 
+/// Get color for size display based on relative size.
+/// Green for small entries, red for large entries.
+fn size_color(size: u64, max_size: u64) -> Color {
+    if max_size == 0 {
+        return Color::Gray;
+    }
+
+    let ratio = size as f64 / max_size as f64;
+
+    if ratio < 0.25 {
+        Color::Green
+    } else if ratio < 0.50 {
+        Color::Yellow
+    } else if ratio < 0.75 {
+        Color::Rgb(255, 165, 0) // Orange
+    } else {
+        Color::Red
+    }
+}
+
 fn render_entry(
     frame: &mut Frame,
     entry: &super::app::VisibleEntry,
@@ -165,10 +186,14 @@ fn render_entry(
     } else {
         0
     };
-    let bar = format!("[{}{}]", "█".repeat(fill), "░".repeat(bar_width - fill));
+    let bar_filled = "█".repeat(fill);
+    let bar_empty = "░".repeat(bar_width - fill);
 
     // Size text
     let size_str = humansize::format_size(entry.entry.size, humansize::BINARY);
+
+    // Get color for size display
+    let size_style_color = size_color(entry.entry.size, max_size);
 
     // Project type indicator (e.g., "[Rust]")
     let project_indicator = entry
@@ -179,7 +204,8 @@ fn render_entry(
 
     // Calculate available width for name
     let prefix_len = indent.len() + icon.len();
-    let suffix_len = bar.len() + size_str.len() + 2 + project_indicator.len();
+    // bar is [████░░░░░░] = bar_width + 2 (for brackets)
+    let suffix_len = (bar_width + 2) + size_str.len() + 2 + project_indicator.len();
     let name_width = (width as usize).saturating_sub(prefix_len + suffix_len);
 
     // Truncate name if needed
@@ -190,27 +216,50 @@ fn render_entry(
         name.clone()
     };
 
-    // Build the line
+    // Build the line using spans for mixed colors
     let padding = " ".repeat(name_width.saturating_sub(display_name.len()));
-    let line = format!("{}{}{}{}{} {} {}", indent, icon, display_name, project_indicator, padding, bar, size_str);
 
-    // Truncate to fit width
-    let line: String = line.chars().take(width as usize).collect();
-
-    // Style
-    let mut style = if entry.entry.is_dir {
+    // Base style for name (blue for dirs, white for files)
+    let name_style = if entry.entry.is_dir {
         Style::default().fg(Color::Blue).bold()
     } else {
         Style::default().fg(Color::White)
     };
 
-    if is_selected {
-        style = style.bg(Color::DarkGray);
+    // Project indicator style (cyan)
+    let project_style = Style::default().fg(Color::Cyan);
+
+    // Size style (colored based on relative size)
+    let size_style = Style::default().fg(size_style_color);
+
+    // Build spans
+    let mut spans = vec![
+        Span::styled(format!("{}{}", indent, icon), name_style),
+        Span::styled(display_name.clone(), name_style),
+    ];
+
+    if !project_indicator.is_empty() {
+        spans.push(Span::styled(project_indicator.clone(), project_style));
     }
 
-    let span = Span::styled(line, style);
+    spans.push(Span::raw(padding));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(bar_filled, size_style));
+    spans.push(Span::styled(bar_empty, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(size_str, size_style));
+
+    let mut line = Line::from(spans);
+
+    // Apply selection background
+    if is_selected {
+        line = line.style(Style::default().bg(Color::DarkGray));
+    }
+
     let area = Rect::new(x, y, width, 1);
-    frame.render_widget(Paragraph::new(span), area);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
@@ -471,5 +520,44 @@ mod tests {
         let backend = TestBackend::new(80, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn test_size_color_gradient() {
+        let max_size = 1000;
+
+        // Small size -> Green
+        assert_eq!(size_color(100, max_size), Color::Green);
+        assert_eq!(size_color(249, max_size), Color::Green);
+
+        // Medium-small -> Yellow
+        assert_eq!(size_color(250, max_size), Color::Yellow);
+        assert_eq!(size_color(499, max_size), Color::Yellow);
+
+        // Medium-large -> Orange
+        assert_eq!(size_color(500, max_size), Color::Rgb(255, 165, 0));
+        assert_eq!(size_color(749, max_size), Color::Rgb(255, 165, 0));
+
+        // Large -> Red
+        assert_eq!(size_color(750, max_size), Color::Red);
+        assert_eq!(size_color(1000, max_size), Color::Red);
+    }
+
+    #[test]
+    fn test_size_color_zero_max() {
+        // Zero max size should return Gray
+        assert_eq!(size_color(100, 0), Color::Gray);
+    }
+
+    #[test]
+    fn test_size_color_edge_cases() {
+        // Same size as max
+        assert_eq!(size_color(1000, 1000), Color::Red);
+
+        // Zero size
+        assert_eq!(size_color(0, 1000), Color::Green);
+
+        // Very large sizes
+        assert_eq!(size_color(1_000_000_000, 1_000_000_000), Color::Red);
     }
 }
