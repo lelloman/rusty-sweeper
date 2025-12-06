@@ -110,12 +110,12 @@ fn scan_respects_depth() {
 }
 
 #[test]
-fn clean_prints_not_implemented() {
+fn clean_size_only_shows_projects() {
     rusty_sweeper()
-        .args(["clean", "."])
+        .args(["clean", "--size-only", "."])
         .assert()
         .success()
-        .stdout(predicate::str::contains("not yet implemented"));
+        .stdout(predicate::str::contains("Scanning for projects"));
 }
 
 #[test]

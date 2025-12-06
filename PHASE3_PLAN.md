@@ -1399,7 +1399,7 @@ mod tests {
 
 ## Task 8: CLI Subcommand Implementation
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2076,7 +2076,7 @@ fn test_max_depth_limiting() {
 | 5 | Project scanner | `[x]` |
 | 6 | Clean executor | `[x]` |
 | 7 | Parallel orchestrator | `[x]` |
-| 8 | CLI subcommand | `[ ]` |
+| 8 | CLI subcommand | `[x]` |
 | 9 | Age filtering | `[ ]` |
 | 10 | Integration tests | `[ ]` |
 

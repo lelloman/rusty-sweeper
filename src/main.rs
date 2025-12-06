@@ -25,8 +25,7 @@ fn main() -> Result<()> {
         }
         Command::Clean(args) => {
             tracing::info!(?args, "Starting clean");
-            println!("Clean command not yet implemented");
-            // TODO: Phase 3
+            commands::clean::run(args)?;
         }
         Command::Scan(args) => {
             tracing::info!(?args, "Starting scan");

@@ -32,6 +32,9 @@ rayon = "1"
 # Progress indication
 indicatif = "0.17"
 
+# Size formatting
+humansize = "2"
+
 [dev-dependencies]
 tempfile = "3"
 assert_cmd = "2"
