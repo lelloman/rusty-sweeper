@@ -96,6 +96,17 @@ fn detect_project_type(path: &Path) -> Option<String> {
     None
 }
 
+/// Preview info for clean confirmation dialog.
+#[derive(Debug, Clone, Default)]
+pub struct CleanPreview {
+    /// Project display name (e.g., "Rust/Cargo").
+    pub project_name: String,
+    /// Artifact directories that would be cleaned.
+    pub artifacts: Vec<(String, u64)>, // (name, size)
+    /// Total size that would be freed.
+    pub total_size: u64,
+}
+
 /// Main application state for the TUI.
 pub struct App {
     /// Root directory being explored.
@@ -134,6 +145,9 @@ pub struct App {
     /// Is currently scanning.
     pub scanning: bool,
 
+    /// Preview info for clean confirmation.
+    pub clean_preview: Option<CleanPreview>,
+
     /// Receiver for progressive scan updates.
     scan_receiver: Option<Receiver<ScanUpdate>>,
 
@@ -158,6 +172,7 @@ impl App {
             should_quit: false,
             status_message: None,
             scanning: false,
+            clean_preview: None,
             scan_receiver: None,
             scan_thread: None,
         }
@@ -540,6 +555,52 @@ impl App {
             registry.detectors().iter().any(|d| d.detect(&entry.entry.path))
         } else {
             false
+        }
+    }
+
+    /// Prepare clean preview for the selected project.
+    /// Returns true if preview was prepared, false if not a valid project.
+    pub fn prepare_clean_preview(&mut self) -> bool {
+        let path = match self.selected_entry() {
+            Some(entry) => entry.entry.path.clone(),
+            None => return false,
+        };
+
+        let registry = DetectorRegistry::new();
+        let matching_detector = registry.detectors().iter().find(|d| d.detect(&path));
+
+        match matching_detector {
+            Some(detector) => {
+                let artifact_paths = detector.find_artifacts(&path);
+                if artifact_paths.is_empty() {
+                    self.status_message = Some("No artifacts to clean".to_string());
+                    return false;
+                }
+
+                let mut artifacts = Vec::new();
+                let mut total_size = 0u64;
+
+                for artifact_path in &artifact_paths {
+                    let name = artifact_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| artifact_path.display().to_string());
+                    let size = dir_size(artifact_path);
+                    artifacts.push((name, size));
+                    total_size += size;
+                }
+
+                self.clean_preview = Some(CleanPreview {
+                    project_name: detector.display_name().to_string(),
+                    artifacts,
+                    total_size,
+                });
+                true
+            }
+            None => {
+                self.status_message = Some("Not a recognized project".to_string());
+                false
+            }
         }
     }
 

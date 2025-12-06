@@ -329,20 +329,7 @@ fn render_search_overlay(app: &App, frame: &mut Frame) {
 fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
     let area = frame.area();
 
-    // Center the dialog
-    let dialog_width = 50u16.min(area.width.saturating_sub(4));
-    let dialog_height = 7u16;
-    let dialog_area = Rect {
-        x: (area.width.saturating_sub(dialog_width)) / 2,
-        y: (area.height.saturating_sub(dialog_height)) / 2,
-        width: dialog_width,
-        height: dialog_height,
-    };
-
-    // Clear background
-    frame.render_widget(Clear, dialog_area);
-
-    let (title, message) = match action {
+    let (title, message, dialog_height) = match action {
         ConfirmAction::Delete => {
             let path = app
                 .selected_entry()
@@ -362,31 +349,53 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
             (
                 " Delete ",
                 format!("Delete '{}'?\n\nSize: {}\n\n[y]es  [n]o", path, size),
+                7u16,
             )
         }
         ConfirmAction::Clean => {
-            let path = app
-                .selected_entry()
-                .map(|e| {
-                    let p = e.entry.path.display().to_string();
-                    if p.len() > 35 {
-                        format!("...{}", &p[p.len() - 32..])
-                    } else {
-                        p
-                    }
-                })
-                .unwrap_or_default();
-            (
-                " Clean Project ",
-                format!("Clean build artifacts in\n'{}'?\n\n[y]es  [n]o", path),
-            )
+            if let Some(preview) = &app.clean_preview {
+                let total_str = humansize::format_size(preview.total_size, humansize::BINARY);
+
+                // Build artifact list
+                let mut artifact_lines = String::new();
+                for (name, size) in &preview.artifacts {
+                    let size_str = humansize::format_size(*size, humansize::BINARY);
+                    artifact_lines.push_str(&format!("  {} ({})\n", name, size_str));
+                }
+
+                let message = format!(
+                    "Clean {} project?\n\nArtifacts to remove:\n{}\nTotal: {}\n\n[y]es  [n]o",
+                    preview.project_name,
+                    artifact_lines,
+                    total_str
+                );
+
+                // Height: title + blank + "Artifacts:" + artifacts + blank + total + blank + buttons + borders
+                let height = (7 + preview.artifacts.len()).min(15) as u16;
+
+                (" Clean Project ", message, height)
+            } else {
+                (" Clean Project ", "No preview available".to_string(), 5u16)
+            }
         }
     };
+
+    // Center the dialog
+    let dialog_width = 50u16.min(area.width.saturating_sub(4));
+    let dialog_area = Rect {
+        x: (area.width.saturating_sub(dialog_width)) / 2,
+        y: (area.height.saturating_sub(dialog_height)) / 2,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Clear background
+    frame.render_widget(Clear, dialog_area);
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(Color::Yellow));
 
     let paragraph = Paragraph::new(message)
         .block(block)

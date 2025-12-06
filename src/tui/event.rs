@@ -83,7 +83,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('c') => {
-            if app.selected_entry().is_some() {
+            if app.selected_entry().is_some() && app.prepare_clean_preview() {
                 app.mode = Mode::Confirm(ConfirmAction::Clean);
             }
         }
