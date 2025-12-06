@@ -118,7 +118,7 @@ predicates = "3"
 
 ### Task 2.1: Define Error Types
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Create custom error types using `thiserror` for all anticipated error conditions.
 
@@ -1109,7 +1109,7 @@ pub use error::{Result, SweeperError};
 |------|------|--------|
 | 1.1 | Initialize Cargo Project | `[x]` |
 | 1.2 | Add Core Dependencies | `[x]` |
-| 2.1 | Define Error Types | `[ ]` |
+| 2.1 | Define Error Types | `[x]` |
 | 3.1 | Define Configuration Structures | `[ ]` |
 | 3.2 | Implement Default Trait | `[ ]` |
 | 3.3 | Implement Config File Loading | `[ ]` |
