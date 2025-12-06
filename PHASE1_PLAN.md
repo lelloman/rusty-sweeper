@@ -77,7 +77,7 @@ rusty-sweeper/
 
 ### Task 1.2: Add Core Dependencies
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Add all dependencies needed for Phase 1 to `Cargo.toml`.
 
@@ -1108,7 +1108,7 @@ pub use error::{Result, SweeperError};
 | Task | Area | Status |
 |------|------|--------|
 | 1.1 | Initialize Cargo Project | `[x]` |
-| 1.2 | Add Core Dependencies | `[ ]` |
+| 1.2 | Add Core Dependencies | `[x]` |
 | 2.1 | Define Error Types | `[ ]` |
 | 3.1 | Define Configuration Structures | `[ ]` |
 | 3.2 | Implement Default Trait | `[ ]` |
