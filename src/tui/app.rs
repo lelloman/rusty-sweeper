@@ -496,4 +496,131 @@ mod tests {
         // Selection should be clamped
         assert!(app.selected < app.visible_entries.len());
     }
+
+    // Navigation method tests
+
+    #[test]
+    fn test_move_selection_down() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        assert_eq!(app.selected, 0);
+        app.move_selection(1);
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_move_selection_up() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        app.selected = 2;
+        app.move_selection(-1);
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_move_selection_clamps_lower() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        app.selected = 0;
+        app.move_selection(-10);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_move_selection_clamps_upper() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        let last = app.visible_entries.len() - 1;
+        app.selected = last;
+        app.move_selection(10);
+        assert_eq!(app.selected, last);
+    }
+
+    #[test]
+    fn test_move_selection_empty_list() {
+        let mut app = App::new(PathBuf::from("/root"));
+        // No tree, empty visible_entries
+        app.move_selection(1);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_expand_selected() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        assert!(!app.expanded.contains(&PathBuf::from("/root")));
+        app.expand_selected();
+        assert!(app.expanded.contains(&PathBuf::from("/root")));
+    }
+
+    #[test]
+    fn test_collapse_selected() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        assert!(app.visible_entries[0].is_expanded);
+        app.collapse_selected();
+        assert!(!app.expanded.contains(&PathBuf::from("/root")));
+    }
+
+    #[test]
+    fn test_go_to_parent() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        // Select a child (dir_b at index 1)
+        app.selected = 1;
+        app.go_to_parent();
+        // Should be back at root (index 0)
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_cycle_sort_order() {
+        let mut app = App::new(PathBuf::from("/root"));
+
+        assert_eq!(app.sort_order, SortOrder::Size);
+        app.cycle_sort_order();
+        assert_eq!(app.sort_order, SortOrder::Name);
+        app.cycle_sort_order();
+        assert_eq!(app.sort_order, SortOrder::Mtime);
+        app.cycle_sort_order();
+        assert_eq!(app.sort_order, SortOrder::Size);
+    }
+
+    #[test]
+    fn test_sort_order_affects_display() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+
+        // Default sort by size - dir_b (500 bytes) comes before dir_a (300 bytes)
+        app.rebuild_visible_entries();
+        assert_eq!(app.visible_entries[1].entry.name, "dir_b");
+        assert_eq!(app.visible_entries[2].entry.name, "dir_a");
+
+        // Sort by name
+        app.sort_order = SortOrder::Name;
+        app.rebuild_visible_entries();
+        assert_eq!(app.visible_entries[1].entry.name, "dir_a");
+        assert_eq!(app.visible_entries[2].entry.name, "dir_b");
+    }
 }

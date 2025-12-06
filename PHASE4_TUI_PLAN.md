@@ -660,7 +660,7 @@ fn test_enter_search_mode() {
 
 ## Task 4.7: Implement Navigation Methods
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2226,7 +2226,7 @@ fn test_very_long_path() {
 | 4.4 | Define application state | `[x]` |
 | 4.5 | Tree flattening logic | `[x]` |
 | 4.6 | Event handling | `[x]` |
-| 4.7 | Navigation methods | `[ ]` |
+| 4.7 | Navigation methods | `[x]` |
 | 4.8 | Basic UI layout | `[ ]` |
 | 4.9 | Tree widget | `[ ]` |
 | 4.10 | Integrate tree widget | `[ ]` |
