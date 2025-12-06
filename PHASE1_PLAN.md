@@ -627,7 +627,7 @@ fn parse_invalid_toml_returns_error() {
 
 ### Task 4.1: Define CLI Structure with Clap
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Define the complete CLI interface using clap's derive macros.
 
@@ -1114,7 +1114,7 @@ pub use error::{Result, SweeperError};
 | 3.2 | Implement Default Trait | `[x]` |
 | 3.3 | Implement Config File Loading | `[x]` |
 | 3.4 | Config Integration Test | `[x]` |
-| 4.1 | Define CLI Structure | `[ ]` |
+| 4.1 | Define CLI Structure | `[x]` |
 | 4.2 | Implement Main Entry Point | `[ ]` |
 | 4.3 | CLI Integration Tests | `[ ]` |
 | 5.1 | Configure Tracing | `[ ]` |
