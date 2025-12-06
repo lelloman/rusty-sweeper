@@ -5,6 +5,7 @@
 //! - Discovering and cleaning build artifacts
 //! - Interactive TUI for disk exploration
 
+pub mod cleaner;
 pub mod cli;
 pub mod commands;
 pub mod config;
