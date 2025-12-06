@@ -788,7 +788,7 @@ fn test_cycle_sort_order() {
 
 ## Task 4.8: Implement Basic UI Layout
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2227,7 +2227,7 @@ fn test_very_long_path() {
 | 4.5 | Tree flattening logic | `[x]` |
 | 4.6 | Event handling | `[x]` |
 | 4.7 | Navigation methods | `[x]` |
-| 4.8 | Basic UI layout | `[ ]` |
+| 4.8 | Basic UI layout | `[x]` |
 | 4.9 | Tree widget | `[ ]` |
 | 4.10 | Integrate tree widget | `[ ]` |
 | 4.11 | Search overlay | `[ ]` |
