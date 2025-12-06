@@ -1463,7 +1463,7 @@ fn test_delete_directory() {
 
 ## Task 4.15: Implement Clean Action
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

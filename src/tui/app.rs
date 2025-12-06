@@ -4,6 +4,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::cleaner::{
+    CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
+};
+use walkdir::WalkDir;
 use crate::scanner::DirEntry;
 
 /// The current UI mode.
@@ -58,6 +62,17 @@ fn delete_path(path: &Path) -> std::io::Result<()> {
     } else {
         fs::remove_file(path)
     }
+}
+
+/// Calculate the total size of a directory.
+fn dir_size(path: &Path) -> u64 {
+    WalkDir::new(path)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
 }
 
 /// Main application state for the TUI.
@@ -279,7 +294,9 @@ impl App {
 
     /// Trigger a rescan of the root directory.
     pub fn trigger_rescan(&mut self) {
-        self.status_message = Some("Rescan not yet implemented".to_string());
+        // TODO: Implement actual rescan in Task 4.16
+        // For now, just set scanning flag - don't overwrite existing status message
+        self.scanning = true;
     }
 
     /// Delete the selected entry.
@@ -311,7 +328,73 @@ impl App {
 
     /// Clean the selected project.
     pub fn clean_selected(&mut self) {
-        self.status_message = Some("Clean not yet implemented".to_string());
+        let path = match self.selected_entry() {
+            Some(entry) => entry.entry.path.clone(),
+            None => {
+                self.status_message = Some("No entry selected".to_string());
+                return;
+            }
+        };
+
+        // Try to detect a project at this path
+        let registry = DetectorRegistry::new();
+
+        // Find a matching detector
+        let matching_detector = registry.detectors().iter().find(|d| d.detect(&path));
+
+        match matching_detector {
+            Some(detector) => {
+                // Find artifact paths and calculate size
+                let artifact_paths = detector.find_artifacts(&path);
+                if artifact_paths.is_empty() {
+                    self.status_message = Some("No artifacts to clean".to_string());
+                    return;
+                }
+
+                let artifact_size: u64 = artifact_paths.iter().map(|p| dir_size(p)).sum();
+
+                let project = DetectedProject {
+                    path: path.clone(),
+                    project_type: detector.id().to_string(),
+                    display_name: detector.display_name().to_string(),
+                    artifact_size,
+                    artifact_paths,
+                };
+
+                let clean_cmd = detector.clean_command();
+                let executor = CleanExecutor::new(CleanOptions::default());
+
+                match executor.clean(&project, clean_cmd) {
+                    CleanResult::Success { freed_bytes, .. } => {
+                        let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
+                        self.status_message = Some(format!(
+                            "Cleaned {} project, freed {}",
+                            project.display_name, freed_str
+                        ));
+                        self.trigger_rescan();
+                    }
+                    CleanResult::Failed { error, .. } => {
+                        self.status_message = Some(format!("Clean failed: {}", error));
+                    }
+                    CleanResult::Skipped { reason, .. } => {
+                        self.status_message = Some(format!("Clean skipped: {}", reason));
+                    }
+                }
+            }
+            None => {
+                self.status_message = Some("Not a recognized project".to_string());
+            }
+        }
+    }
+
+    /// Check if the selected entry is a cleanable project.
+    pub fn selected_is_project(&self) -> bool {
+        if let Some(entry) = self.selected_entry() {
+            let registry = DetectorRegistry::new();
+            registry.detectors().iter().any(|d| d.detect(&entry.entry.path))
+        } else {
+            false
+        }
     }
 }
 
@@ -687,5 +770,125 @@ mod tests {
         app.delete_selected();
         assert!(app.status_message.is_some());
         assert!(app.status_message.as_ref().unwrap().contains("No entry"));
+    }
+
+    // Clean tests
+
+    #[test]
+    fn test_clean_selected_no_entry() {
+        let mut app = App::new(PathBuf::from("/"));
+        app.clean_selected();
+        assert!(app.status_message.is_some());
+        assert!(app.status_message.as_ref().unwrap().contains("No entry"));
+    }
+
+    #[test]
+    fn test_clean_selected_not_a_project() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        app.clean_selected();
+        assert!(app.status_message.is_some());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Not a recognized project"));
+    }
+
+    #[test]
+    fn test_clean_selected_cargo_project() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create a cargo project structure
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+        let target_dir = temp_dir.path().join("target");
+        fs::create_dir(&target_dir).unwrap();
+        fs::write(target_dir.join("artifact.bin"), "x".repeat(1000)).unwrap();
+
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        assert!(target_dir.exists());
+        app.clean_selected();
+
+        // Target should be removed (regardless of whether cargo clean or direct deletion was used)
+        assert!(!target_dir.exists());
+        assert!(app.status_message.is_some());
+        // The clean succeeded - should contain "Cleaned" or show freed space
+        let msg = app.status_message.as_ref().unwrap();
+        assert!(
+            msg.contains("Cleaned") || msg.contains("freed"),
+            "Expected success message, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_clean_selected_no_artifacts() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create a cargo project structure without target directory
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        app.clean_selected();
+        assert!(app.status_message.is_some());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("No artifacts"));
+    }
+
+    #[test]
+    fn test_selected_is_project_true() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        assert!(app.selected_is_project());
+    }
+
+    #[test]
+    fn test_selected_is_project_false() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(root);
+        app.rebuild_visible_entries();
+
+        assert!(!app.selected_is_project());
+    }
+
+    #[test]
+    fn test_dir_size_calculation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let subdir = temp_dir.path().join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        fs::write(subdir.join("file1.bin"), "x".repeat(100)).unwrap();
+        fs::write(subdir.join("file2.bin"), "y".repeat(200)).unwrap();
+
+        let size = dir_size(&subdir);
+        assert_eq!(size, 300);
     }
 }
