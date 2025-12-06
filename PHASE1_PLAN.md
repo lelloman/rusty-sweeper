@@ -206,7 +206,7 @@ mod tests {
 
 ### Task 3.1: Define Configuration Structures
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Define Serde-compatible structs representing the TOML configuration schema.
 
@@ -312,7 +312,7 @@ mod tests {
 
 ### Task 3.2: Implement Default Trait for Config Structs
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 **Description**: Implement `Default` for all config structs with sensible values from the spec.
 
@@ -1110,8 +1110,8 @@ pub use error::{Result, SweeperError};
 | 1.1 | Initialize Cargo Project | `[x]` |
 | 1.2 | Add Core Dependencies | `[x]` |
 | 2.1 | Define Error Types | `[x]` |
-| 3.1 | Define Configuration Structures | `[ ]` |
-| 3.2 | Implement Default Trait | `[ ]` |
+| 3.1 | Define Configuration Structures | `[x]` |
+| 3.2 | Implement Default Trait | `[x]` |
 | 3.3 | Implement Config File Loading | `[ ]` |
 | 3.4 | Config Integration Test | `[ ]` |
 | 4.1 | Define CLI Structure | `[ ]` |
