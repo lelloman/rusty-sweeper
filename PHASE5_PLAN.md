@@ -507,7 +507,7 @@ mod tests {
 
 ## Task 4: Define Notifier Trait
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
