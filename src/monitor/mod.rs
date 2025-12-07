@@ -1,3 +1,4 @@
+pub mod daemon;
 pub mod disk;
 pub mod notifier;
 pub mod notifiers;
@@ -5,6 +6,7 @@ pub mod service;
 pub mod signals;
 pub mod types;
 
+pub use daemon::{cleanup_pid_file, daemon_status, daemonize, stop_daemon, DaemonPaths};
 pub use disk::{check_all_mount_points, check_disk_usage, check_mount_points, MountPoint};
 pub use notifier::{format_alert_body, format_alert_title, Notifier};
 pub use notifiers::{
