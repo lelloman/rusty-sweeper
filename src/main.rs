@@ -1,5 +1,7 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
+use std::io;
 
 use rusty_sweeper::cli::{Cli, Command};
 use rusty_sweeper::commands;
@@ -34,6 +36,10 @@ fn main() -> Result<()> {
             tracing::info!(?args, "Starting TUI");
             let root = args.path.canonicalize()?;
             rusty_sweeper::tui::run(root)?;
+        }
+        Command::Completions(args) => {
+            let mut cmd = Cli::command();
+            generate(args.shell, &mut cmd, "rusty-sweeper", &mut io::stdout());
         }
     }
 

@@ -1,0 +1,284 @@
+#compdef rusty-sweeper
+
+autoload -U is-at-least
+
+_rusty-sweeper() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+":: :_rusty-sweeper_commands" \
+"*::: :->rusty-sweeper" \
+&& ret=0
+    case $state in
+    (rusty-sweeper)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:rusty-sweeper-command-$line[1]:"
+        case $line[1] in
+            (monitor)
+_arguments "${_arguments_options[@]}" : \
+'-i+[Check interval in seconds]:SECS:_default' \
+'--interval=[Check interval in seconds]:SECS:_default' \
+'-w+[Warning threshold percentage]:PERCENT:_default' \
+'--warn=[Warning threshold percentage]:PERCENT:_default' \
+'-C+[Critical threshold percentage]:PERCENT:_default' \
+'--critical=[Critical threshold percentage]:PERCENT:_default' \
+'*-m+[Mount points to monitor (can be specified multiple times)]:PATH:_files' \
+'*--mount=[Mount points to monitor (can be specified multiple times)]:PATH:_files' \
+'--notify=[Notification backend (auto, dbus, notify-send, stderr)]:BACKEND:_default' \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'-d[Run as background daemon]' \
+'--daemon[Run as background daemon]' \
+'--once[Check once and exit]' \
+'--stop[Stop running daemon]' \
+'--status[Show daemon status]' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+&& ret=0
+;;
+(clean)
+_arguments "${_arguments_options[@]}" : \
+'-d+[Maximum recursion depth]:N:_default' \
+'--max-depth=[Maximum recursion depth]:N:_default' \
+'*-t+[Project types to clean (comma-separated)]:TYPES:_default' \
+'*--types=[Project types to clean (comma-separated)]:TYPES:_default' \
+'*-e+[Paths to exclude (glob patterns)]:PATTERNS:_default' \
+'*--exclude=[Paths to exclude (glob patterns)]:PATTERNS:_default' \
+'-a+[Only clean projects not modified in N days]:DAYS:_default' \
+'--age=[Only clean projects not modified in N days]:DAYS:_default' \
+'-j+[Parallel clean jobs]:N:_default' \
+'--jobs=[Parallel clean jobs]:N:_default' \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'-n[Show what would be cleaned without doing it]' \
+'--dry-run[Show what would be cleaned without doing it]' \
+'-f[Skip confirmation prompts]' \
+'--force[Skip confirmation prompts]' \
+'--size-only[Only report sizes, don'\''t clean]' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+'::path -- Root directory to scan:_files' \
+&& ret=0
+;;
+(scan)
+_arguments "${_arguments_options[@]}" : \
+'-d+[Maximum depth to display]:N:_default' \
+'--max-depth=[Maximum depth to display]:N:_default' \
+'-n+[Show top N entries by size]:N:_default' \
+'--top=[Show top N entries by size]:N:_default' \
+'-j+[Parallel scan threads]:N:_default' \
+'--jobs=[Parallel scan threads]:N:_default' \
+'--sort=[Sort by\: size, name, mtime]:BY:_default' \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'-a[Include hidden files]' \
+'--all[Include hidden files]' \
+'-x[Don'\''t cross filesystem boundaries]' \
+'--one-file-system[Don'\''t cross filesystem boundaries]' \
+'--json[Output as JSON]' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+'::path -- Directory to analyze:_files' \
+&& ret=0
+;;
+(tui)
+_arguments "${_arguments_options[@]}" : \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'-x[Don'\''t cross filesystem boundaries]' \
+'--one-file-system[Don'\''t cross filesystem boundaries]' \
+'--no-color[Disable colors]' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+'::path -- Starting directory:_files' \
+&& ret=0
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+'-c+[Path to configuration file]:PATH:_files' \
+'--config=[Path to configuration file]:PATH:_files' \
+'*-v[Increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Increase verbosity (-v, -vv, -vvv)]' \
+'-q[Suppress non-essential output]' \
+'--quiet[Suppress non-essential output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+':shell -- Shell to generate completions for:(bash elvish fish powershell zsh)' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_rusty-sweeper__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:rusty-sweeper-help-command-$line[1]:"
+        case $line[1] in
+            (monitor)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clean)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(scan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(tui)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+}
+
+(( $+functions[_rusty-sweeper_commands] )) ||
+_rusty-sweeper_commands() {
+    local commands; commands=(
+'monitor:Start disk usage monitoring' \
+'clean:Scan for projects and clean build artifacts' \
+'scan:Analyze disk usage of a directory' \
+'tui:Launch interactive TUI' \
+'completions:Generate shell completions' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'rusty-sweeper commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__clean_commands] )) ||
+_rusty-sweeper__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper clean commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__completions_commands] )) ||
+_rusty-sweeper__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper completions commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help_commands] )) ||
+_rusty-sweeper__help_commands() {
+    local commands; commands=(
+'monitor:Start disk usage monitoring' \
+'clean:Scan for projects and clean build artifacts' \
+'scan:Analyze disk usage of a directory' \
+'tui:Launch interactive TUI' \
+'completions:Generate shell completions' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'rusty-sweeper help commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__clean_commands] )) ||
+_rusty-sweeper__help__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help clean commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__completions_commands] )) ||
+_rusty-sweeper__help__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help completions commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__help_commands] )) ||
+_rusty-sweeper__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help help commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__monitor_commands] )) ||
+_rusty-sweeper__help__monitor_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help monitor commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__scan_commands] )) ||
+_rusty-sweeper__help__scan_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help scan commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__help__tui_commands] )) ||
+_rusty-sweeper__help__tui_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper help tui commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__monitor_commands] )) ||
+_rusty-sweeper__monitor_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper monitor commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__scan_commands] )) ||
+_rusty-sweeper__scan_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper scan commands' commands "$@"
+}
+(( $+functions[_rusty-sweeper__tui_commands] )) ||
+_rusty-sweeper__tui_commands() {
+    local commands; commands=()
+    _describe -t commands 'rusty-sweeper tui commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_rusty-sweeper" ]; then
+    _rusty-sweeper "$@"
+else
+    compdef _rusty-sweeper rusty-sweeper
+fi

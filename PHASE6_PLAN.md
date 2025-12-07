@@ -41,7 +41,7 @@ There are 2 warnings from Phase 2/3 code that should be fixed:
 
 ## Task 2: Add Shell Completions
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 /// Rusty Sweeper - A Linux disk usage management utility
@@ -36,6 +37,16 @@ pub enum Command {
 
     /// Launch interactive TUI
     Tui(TuiArgs),
+
+    /// Generate shell completions
+    Completions(CompletionsArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for
+    #[arg(value_enum)]
+    pub shell: Shell,
 }
 
 #[derive(Args, Debug)]
