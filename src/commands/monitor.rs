@@ -61,8 +61,8 @@ pub fn run(args: MonitorArgs) -> Result<()> {
 
     install_signal_handlers(Arc::clone(&running), Arc::clone(&reload))?;
 
-    // Create and run the monitor service
-    let mut service = MonitorService::new(options);
+    // Create and run the monitor service (pass running flag so Ctrl+C works)
+    let mut service = MonitorService::new(options, Arc::clone(&running));
 
     // Run the monitoring loop
     let result = service.run();

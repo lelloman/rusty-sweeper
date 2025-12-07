@@ -21,7 +21,7 @@ pub struct MonitorService {
 }
 
 impl MonitorService {
-    pub fn new(options: MonitorOptions) -> Self {
+    pub fn new(options: MonitorOptions, running: Arc<AtomicBool>) -> Self {
         let notifier = create_notifier(options.notification_backend);
         let i3_notifier = get_i3_notifier();
 
@@ -34,7 +34,7 @@ impl MonitorService {
             options,
             notifier,
             i3_notifier,
-            running: Arc::new(AtomicBool::new(true)),
+            running,
             last_alerts: HashMap::new(),
         }
     }
@@ -170,7 +170,8 @@ mod tests {
     #[test]
     fn test_monitor_service_creation() {
         let options = MonitorOptions::default();
-        let service = MonitorService::new(options);
+        let running = Arc::new(AtomicBool::new(true));
+        let service = MonitorService::new(options, running);
 
         assert!(service.running.load(Ordering::SeqCst));
     }
@@ -181,7 +182,8 @@ mod tests {
             once: true,
             ..Default::default()
         };
-        let mut service = MonitorService::new(options);
+        let running = Arc::new(AtomicBool::new(true));
+        let mut service = MonitorService::new(options, running);
 
         // Should complete without hanging
         let result = service.run();
@@ -191,7 +193,8 @@ mod tests {
     #[test]
     fn test_monitor_stop() {
         let options = MonitorOptions::default();
-        let service = MonitorService::new(options);
+        let running = Arc::new(AtomicBool::new(true));
+        let service = MonitorService::new(options, running);
 
         service.stop();
         assert!(!service.running.load(Ordering::SeqCst));
@@ -200,12 +203,14 @@ mod tests {
     #[test]
     fn test_running_flag_shared() {
         let options = MonitorOptions::default();
-        let service = MonitorService::new(options);
+        let running = Arc::new(AtomicBool::new(true));
+        let service = MonitorService::new(options, Arc::clone(&running));
 
         let flag = service.running_flag();
         assert!(flag.load(Ordering::SeqCst));
 
-        service.stop();
+        // External flag controls the service
+        running.store(false, Ordering::SeqCst);
         assert!(!flag.load(Ordering::SeqCst));
     }
 }
