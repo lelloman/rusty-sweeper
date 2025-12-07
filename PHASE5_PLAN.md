@@ -2329,25 +2329,25 @@ fn test_monitor_stderr_backend() {
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 1 | Add monitor dependencies | `[ ]` |
-| 2 | Define data structures | `[ ]` |
-| 3 | Implement disk usage checker | `[ ]` |
-| 4 | Define notifier trait | `[ ]` |
-| 5 | Implement D-Bus notifier | `[ ]` |
-| 6 | Implement notify-send fallback | `[ ]` |
-| 7 | Implement i3-nagbar notifier | `[ ]` |
-| 8 | Implement stderr fallback | `[ ]` |
-| 9 | Create notifier registry | `[ ]` |
-| 10 | Implement monitor loop | `[ ]` |
-| 11 | Implement signal handling | `[ ]` |
-| 12 | Implement daemon mode | `[ ]` |
-| 13 | Implement CLI subcommand | `[ ]` |
-| 14 | Create systemd service file | `[ ]` |
-| 15 | Add module structure | `[ ]` |
-| 16 | Update error types | `[ ]` |
-| 17 | Integration tests | `[ ]` |
+| 1 | Add monitor dependencies | `[x]` |
+| 2 | Define data structures | `[x]` |
+| 3 | Implement disk usage checker | `[x]` |
+| 4 | Define notifier trait | `[x]` |
+| 5 | Implement D-Bus notifier | `[x]` |
+| 6 | Implement notify-send fallback | `[x]` |
+| 7 | Implement i3-nagbar notifier | `[x]` |
+| 8 | Implement stderr fallback | `[x]` |
+| 9 | Create notifier registry | `[x]` |
+| 10 | Implement monitor loop | `[x]` |
+| 11 | Implement signal handling | `[x]` |
+| 12 | Implement daemon mode | `[x]` |
+| 13 | Implement CLI subcommand | `[x]` |
+| 14 | Create systemd service file | `[x]` |
+| 15 | Add module structure | `[x]` |
+| 16 | Update error types | `[x]` |
+| 17 | Integration tests | `[x]` |
 
-**Total: 17 tasks**
+**Total: 17 tasks (all complete)**
 
 ---
 
