@@ -324,7 +324,7 @@ MIT
 
 ## Task 5: Create GitHub Actions CI
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
