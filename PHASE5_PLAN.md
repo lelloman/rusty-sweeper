@@ -904,7 +904,7 @@ mod tests {
 
 ## Task 7: Implement i3-nagbar Notifier
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
