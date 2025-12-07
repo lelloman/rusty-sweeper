@@ -119,10 +119,7 @@ impl CleanExecutor {
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Command failed: {}", stderr),
-            ))
+            Err(io::Error::other(format!("Command failed: {}", stderr)))
         }
     }
 

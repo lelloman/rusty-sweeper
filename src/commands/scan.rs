@@ -20,7 +20,7 @@ pub enum SortOrder {
 }
 
 impl SortOrder {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "name" => SortOrder::Name,
             "mtime" => SortOrder::Size, // Fallback to size for now
@@ -76,7 +76,7 @@ pub fn run(args: ScanArgs) -> Result<()> {
     }
 
     // Apply sorting
-    let sort_order = SortOrder::from_str(&args.sort);
+    let sort_order = SortOrder::parse(&args.sort);
     match sort_order {
         SortOrder::Size => entry.sort_by_size(),
         SortOrder::Name => entry.sort_by_name(),
@@ -120,7 +120,7 @@ pub fn run_table(args: ScanArgs) -> Result<()> {
 
     let mut entry = scan_directory_parallel(&args.path, &scan_options)?;
 
-    let sort_order = SortOrder::from_str(&args.sort);
+    let sort_order = SortOrder::parse(&args.sort);
     match sort_order {
         SortOrder::Size => entry.sort_by_size(),
         SortOrder::Name => entry.sort_by_name(),
@@ -142,10 +142,10 @@ mod tests {
 
     #[test]
     fn test_sort_order_from_str() {
-        assert_eq!(SortOrder::from_str("size"), SortOrder::Size);
-        assert_eq!(SortOrder::from_str("SIZE"), SortOrder::Size);
-        assert_eq!(SortOrder::from_str("name"), SortOrder::Name);
-        assert_eq!(SortOrder::from_str("NAME"), SortOrder::Name);
-        assert_eq!(SortOrder::from_str("invalid"), SortOrder::Size);
+        assert_eq!(SortOrder::parse("size"), SortOrder::Size);
+        assert_eq!(SortOrder::parse("SIZE"), SortOrder::Size);
+        assert_eq!(SortOrder::parse("name"), SortOrder::Name);
+        assert_eq!(SortOrder::parse("NAME"), SortOrder::Name);
+        assert_eq!(SortOrder::parse("invalid"), SortOrder::Size);
     }
 }

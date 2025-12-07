@@ -1,5 +1,5 @@
 /// Configuration options for directory scanning operations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ScanOptions {
     /// Maximum depth to recurse (None = unlimited)
     pub max_depth: Option<usize>,
@@ -24,18 +24,6 @@ pub struct ScanOptions {
 /// These can report incorrect/huge sizes and cause scanning issues.
 pub const LINUX_VIRTUAL_FS_PATHS: &[&str] = &["/proc", "/dev", "/sys", "/run"];
 
-impl Default for ScanOptions {
-    fn default() -> Self {
-        Self {
-            max_depth: None,
-            include_hidden: false,
-            one_file_system: false,
-            threads: 0,
-            exclude_patterns: vec![],
-            follow_symlinks: false,
-        }
-    }
-}
 
 impl ScanOptions {
     /// Check if a path should be excluded based on Linux virtual filesystem paths

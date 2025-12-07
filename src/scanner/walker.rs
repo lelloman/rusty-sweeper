@@ -193,18 +193,16 @@ fn scan_dir_recursive_parallel(
     };
 
     // If it's a symlink, skip it (unless follow_symlinks is enabled)
-    if symlink_meta.file_type().is_symlink() {
-        if !options.follow_symlinks {
-            // Return a zero-size file entry for the symlink itself
-            return Ok(DirEntry::new_file(
-                path.to_path_buf(),
-                0,
-                0,
-                symlink_meta.modified().ok(),
-            ));
-        }
-        // If following symlinks, get the target metadata
+    if symlink_meta.file_type().is_symlink() && !options.follow_symlinks {
+        // Return a zero-size file entry for the symlink itself
+        return Ok(DirEntry::new_file(
+            path.to_path_buf(),
+            0,
+            0,
+            symlink_meta.modified().ok(),
+        ));
     }
+    // If following symlinks, get the target metadata
 
     // Get actual metadata (follows symlinks if it is one and we got here)
     let metadata = if symlink_meta.file_type().is_symlink() {
@@ -358,7 +356,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     }
 
     // Build final tree
-    let mut tree = build_partial_tree(&root, &metadata, &children);
+    let tree = build_partial_tree(&root, &metadata, &children);
     let _ = tx.send(ScanUpdate::Complete { tree });
 }
 

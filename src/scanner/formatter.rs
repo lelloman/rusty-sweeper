@@ -130,7 +130,7 @@ fn format_tree_recursive(
         };
 
         let total = children_to_show.len();
-        let has_more = options.top_n.map_or(false, |n| entry.children.len() > n);
+        let has_more = options.top_n.is_some_and(|n| entry.children.len() > n);
 
         for (i, child) in children_to_show.iter().enumerate() {
             let is_last_child = i == total - 1 && !has_more;

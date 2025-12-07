@@ -40,6 +40,7 @@ pub fn format_size(bytes: u64) -> String {
 }
 
 /// Parse a size string like "1GB" into bytes
+#[allow(dead_code)]
 pub fn parse_size(s: &str) -> Option<u64> {
     let s = s.trim().to_uppercase();
 

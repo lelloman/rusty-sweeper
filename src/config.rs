@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Root configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub monitor: MonitorConfig,
@@ -68,16 +68,6 @@ pub struct TuiConfig {
     pub large_dir_threshold: u64,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            monitor: MonitorConfig::default(),
-            cleaner: CleanerConfig::default(),
-            scanner: ScannerConfig::default(),
-            tui: TuiConfig::default(),
-        }
-    }
-}
 
 impl Default for MonitorConfig {
     fn default() -> Self {
