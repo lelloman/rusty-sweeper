@@ -1121,7 +1121,7 @@ mod tests {
 
 ## Task 9: Create Notifier Registry
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
