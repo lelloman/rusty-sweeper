@@ -1224,7 +1224,7 @@ mod tests {
 
 ## Task 10: Implement Monitor Loop
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
