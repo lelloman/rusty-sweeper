@@ -1462,7 +1462,7 @@ mod tests {
 
 ## Task 11: Implement Signal Handling
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
