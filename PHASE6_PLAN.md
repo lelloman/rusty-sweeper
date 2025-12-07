@@ -584,7 +584,7 @@ SOFTWARE.
 
 ## Task 8: Improve Error Messages
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

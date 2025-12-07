@@ -17,13 +17,13 @@ pub enum SweeperError {
     #[error("IO error: {0}")]
     IoSimple(#[from] std::io::Error),
 
-    #[error("Permission denied: {0}")]
+    #[error("Permission denied: {0}\n  Hint: Try running with sudo or check file permissions")]
     PermissionDenied(PathBuf),
 
-    #[error("Path not found: {0}")]
+    #[error("Path not found: {0}\n  Hint: Check if the path exists and is spelled correctly")]
     PathNotFound(PathBuf),
 
-    #[error("Not a directory: {0}")]
+    #[error("Not a directory: {0}\n  Hint: Provide a directory path, not a file")]
     NotADirectory(PathBuf),
 
     #[error("Invalid path: {0}")]
@@ -38,7 +38,7 @@ pub enum SweeperError {
     #[error("Notification failed: {0}")]
     Notification(#[from] notify_rust::error::Error),
 
-    #[error("Monitor already running (PID: {0})")]
+    #[error("Monitor already running (PID: {0})\n  Hint: Use 'rusty-sweeper monitor --stop' to stop it first")]
     AlreadyRunning(u32),
 
     #[error("Command failed: {0}")]
@@ -143,6 +143,7 @@ mod tests {
         let err = SweeperError::NotADirectory(PathBuf::from("/some/file"));
         assert!(err.to_string().contains("Not a directory"));
         assert!(err.to_string().contains("/some/file"));
+        assert!(err.to_string().contains("Hint"));
     }
 
     #[test]
