@@ -2238,7 +2238,7 @@ pub enum Error {
 
 ## Task 17: Integration Tests
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
