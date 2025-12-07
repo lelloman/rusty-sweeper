@@ -751,7 +751,7 @@ mod tests {
 
 ## Task 6: Implement notify-send Fallback
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
