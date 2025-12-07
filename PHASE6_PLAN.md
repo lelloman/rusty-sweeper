@@ -169,7 +169,7 @@ fn main() -> Result<(), Error> {
 
 ## Task 4: Write README
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
