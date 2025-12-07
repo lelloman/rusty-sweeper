@@ -1,0 +1,246 @@
+.TH RUSTY-SWEEPER 1 "December 2024" "rusty-sweeper 0.1.0" "User Commands"
+.SH NAME
+rusty-sweeper \- a fast, interactive disk usage analyzer and cleaner for Linux
+.SH SYNOPSIS
+.B rusty-sweeper
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+.B rusty-sweeper
+is a disk usage management utility that provides:
+.IP \(bu 2
+Fast parallel disk scanning
+.IP \(bu 2
+Project detection and build artifact cleaning (Cargo, npm, Go, Python, etc.)
+.IP \(bu 2
+Interactive TUI with ncdu-like interface
+.IP \(bu 2
+Background monitoring with desktop notifications
+.SH GLOBAL OPTIONS
+.TP
+.BR \-c ", " \-\-config =\fIPATH\fR
+Path to configuration file
+.TP
+.BR \-v ", " \-\-verbose
+Increase verbosity (-v, -vv, -vvv)
+.TP
+.BR \-q ", " \-\-quiet
+Suppress non-essential output
+.TP
+.BR \-h ", " \-\-help
+Print help information
+.TP
+.BR \-V ", " \-\-version
+Print version information
+.SH COMMANDS
+.SS scan
+Analyze disk usage of a directory.
+.PP
+.B rusty-sweeper scan
+[\fIOPTIONS\fR] [\fIPATH\fR]
+.TP
+.BR \-d ", " \-\-max-depth =\fIN\fR
+Maximum depth to display (default: 3)
+.TP
+.BR \-n ", " \-\-top =\fIN\fR
+Show top N entries by size (default: 20)
+.TP
+.BR \-a ", " \-\-all
+Include hidden files
+.TP
+.BR \-x ", " \-\-one-file-system
+Don't cross filesystem boundaries
+.TP
+.BR \-j ", " \-\-jobs =\fIN\fR
+Parallel scan threads
+.TP
+.B \-\-json
+Output as JSON
+.TP
+.B \-\-sort =\fIBY\fR
+Sort by: size, name, mtime
+.SS clean
+Scan for projects and clean build artifacts.
+.PP
+.B rusty-sweeper clean
+[\fIOPTIONS\fR] [\fIPATH\fR]
+.TP
+.BR \-n ", " \-\-dry-run
+Show what would be cleaned without doing it
+.TP
+.BR \-d ", " \-\-max-depth =\fIN\fR
+Maximum recursion depth (default: 10)
+.TP
+.BR \-t ", " \-\-types =\fITYPES\fR
+Project types to clean (comma-separated)
+.TP
+.BR \-e ", " \-\-exclude =\fIPATTERNS\fR
+Paths to exclude (glob patterns)
+.TP
+.BR \-a ", " \-\-age =\fIDAYS\fR
+Only clean projects not modified in N days
+.TP
+.BR \-f ", " \-\-force
+Skip confirmation prompts
+.TP
+.BR \-j ", " \-\-jobs =\fIN\fR
+Parallel clean jobs (default: 4)
+.TP
+.B \-\-size-only
+Only report sizes, don't clean
+.SS tui
+Launch interactive TUI.
+.PP
+.B rusty-sweeper tui
+[\fIOPTIONS\fR] [\fIPATH\fR]
+.TP
+.BR \-x ", " \-\-one-file-system
+Don't cross filesystem boundaries
+.TP
+.B \-\-no-color
+Disable colors
+.SS monitor
+Start disk usage monitoring.
+.PP
+.B rusty-sweeper monitor
+[\fIOPTIONS\fR]
+.TP
+.BR \-d ", " \-\-daemon
+Run as background daemon
+.TP
+.BR \-i ", " \-\-interval =\fISECS\fR
+Check interval in seconds (default: 300)
+.TP
+.BR \-w ", " \-\-warn =\fIPERCENT\fR
+Warning threshold percentage (default: 80)
+.TP
+.BR \-C ", " \-\-critical =\fIPERCENT\fR
+Critical threshold percentage (default: 90)
+.TP
+.BR \-m ", " \-\-mount =\fIPATH\fR
+Mount points to monitor (can be repeated)
+.TP
+.B \-\-once
+Check once and exit
+.TP
+.B \-\-stop
+Stop running daemon
+.TP
+.B \-\-status
+Show daemon status
+.TP
+.B \-\-notify =\fIBACKEND\fR
+Notification backend: auto, dbus, notify-send, stderr
+.SS completions
+Generate shell completions.
+.PP
+.B rusty-sweeper completions
+\fISHELL\fR
+.PP
+Where \fISHELL\fR is one of: bash, zsh, fish, elvish, powershell
+.SH TUI KEYBINDINGS
+.TP
+.BR j / \[da]
+Move down
+.TP
+.BR k / \[ua]
+Move up
+.TP
+.BR Enter / l / \[->]
+Expand/enter directory
+.TP
+.BR h / \[<-] / Backspace
+Collapse/go up
+.TP
+.BR d / Delete
+Delete selected
+.TP
+.B c
+Clean project
+.TP
+.B /
+Search
+.TP
+.B .
+Toggle hidden files
+.TP
+.B r
+Rescan
+.TP
+.B ?
+Help
+.TP
+.BR q / Esc
+Quit
+.SH CONFIGURATION
+Configuration file: \fI~/.config/rusty-sweeper/config.toml\fR
+.PP
+Example:
+.PP
+.RS
+.nf
+[scanner]
+max_depth = 10
+exclude = ["node_modules", ".git"]
+
+[cleaner]
+types = ["cargo", "npm", "go"]
+
+[monitor]
+interval = 300
+warn_threshold = 80
+critical_threshold = 90
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.config/rusty-sweeper/config.toml
+User configuration file
+.TP
+.I $XDG_RUNTIME_DIR/rusty-sweeper.pid
+Monitor daemon PID file
+.TP
+.I ~/.local/state/rusty-sweeper/monitor.log
+Monitor daemon log file
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+General error
+.TP
+.B 2
+Configuration error
+.TP
+.B 3
+Permission denied
+.TP
+.B 4
+Monitor already running
+.SH EXAMPLES
+.TP
+Scan current directory:
+.B rusty-sweeper scan
+.TP
+Find and show cleanable project sizes:
+.B rusty-sweeper clean --size-only ~/projects
+.TP
+Clean all Cargo and npm projects older than 30 days:
+.B rusty-sweeper clean -t cargo,npm -a 30 ~/projects
+.TP
+Start interactive TUI at home directory:
+.B rusty-sweeper tui ~
+.TP
+Start monitor daemon with custom thresholds:
+.B rusty-sweeper monitor -d -w 70 -C 85
+.TP
+Generate bash completions:
+.B rusty-sweeper completions bash > ~/.bash_completion.d/rusty-sweeper
+.SH AUTHOR
+Written by the rusty-sweeper contributors.
+.SH REPORTING BUGS
+Report bugs at: https://github.com/user/rusty-sweeper/issues
+.SH SEE ALSO
+.BR ncdu (1),
+.BR du (1),
+.BR df (1)

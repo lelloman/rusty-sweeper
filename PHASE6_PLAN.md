@@ -117,7 +117,7 @@ pub enum Command {
 
 ## Task 3: Generate Man Page
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
