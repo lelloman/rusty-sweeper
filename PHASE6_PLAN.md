@@ -447,7 +447,7 @@ jobs:
 
 ## Task 6: Create AUR PKGBUILD
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
