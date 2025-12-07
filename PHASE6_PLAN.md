@@ -707,7 +707,7 @@ du -sh "$FIXTURE_DIR"/*
 
 ## Task 10: Version Bump and Changelog
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -764,18 +764,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 1 | Fix build warnings | `[ ]` |
-| 2 | Add shell completions | `[ ]` |
-| 3 | Generate man page | `[ ]` |
-| 4 | Write README | `[ ]` |
-| 5 | Create GitHub Actions CI | `[ ]` |
-| 6 | Create AUR PKGBUILD | `[ ]` |
-| 7 | Add license file | `[ ]` |
-| 8 | Improve error messages | `[ ]` |
-| 9 | Add test fixtures script | `[ ]` |
-| 10 | Version bump and changelog | `[ ]` |
+| 1 | Fix build warnings | `[x]` |
+| 2 | Add shell completions | `[x]` |
+| 3 | Generate man page | `[x]` |
+| 4 | Write README | `[x]` |
+| 5 | Create GitHub Actions CI | `[x]` |
+| 6 | Create AUR PKGBUILD | `[x]` |
+| 7 | Add license file | `[x]` |
+| 8 | Improve error messages | `[x]` |
+| 9 | Add test fixtures script | `[x]` |
+| 10 | Version bump and changelog | `[x]` |
 
-**Total: 10 tasks**
+**Total: 10 tasks - ALL COMPLETE**
 
 ---
 
