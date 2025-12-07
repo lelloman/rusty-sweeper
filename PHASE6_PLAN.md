@@ -541,7 +541,7 @@ package() {
 
 ## Task 7: Add License File
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
