@@ -2054,7 +2054,7 @@ mod tests {
 
 ## Task 14: Create Systemd Service File
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
