@@ -68,7 +68,6 @@ pub struct TuiConfig {
     pub large_dir_threshold: u64,
 }
 
-
 impl Default for MonitorConfig {
     fn default() -> Self {
         Self {

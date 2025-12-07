@@ -48,9 +48,7 @@ pub trait ProjectDetector: Send + Sync {
     ///
     /// Default implementation checks if any detection file exists.
     fn detect(&self, path: &Path) -> bool {
-        self.detection_files()
-            .iter()
-            .any(|f| path.join(f).exists())
+        self.detection_files().iter().any(|f| path.join(f).exists())
     }
 
     /// Get existing artifact directories at the given path.

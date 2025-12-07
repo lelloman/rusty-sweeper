@@ -151,7 +151,10 @@ impl ProjectScanner {
     ///
     /// This checks the modification time of source files (excluding artifacts)
     /// to determine when the project was last actively worked on.
-    pub fn filter_by_age(projects: Vec<DetectedProject>, min_age_days: u64) -> Vec<DetectedProject> {
+    pub fn filter_by_age(
+        projects: Vec<DetectedProject>,
+        min_age_days: u64,
+    ) -> Vec<DetectedProject> {
         let cutoff = SystemTime::now() - Duration::from_secs(min_age_days * 24 * 60 * 60);
 
         projects
@@ -220,11 +223,7 @@ mod tests {
         fs::create_dir_all(&npm_proj).unwrap();
         fs::write(npm_proj.join("package.json"), "{}").unwrap();
         fs::create_dir(npm_proj.join("node_modules")).unwrap();
-        fs::write(
-            npm_proj.join("node_modules/dep.js"),
-            "x".repeat(500),
-        )
-        .unwrap();
+        fs::write(npm_proj.join("node_modules/dep.js"), "x".repeat(500)).unwrap();
 
         // Regular directory (not a project)
         fs::create_dir_all(tmp.path().join("docs")).unwrap();
@@ -255,10 +254,7 @@ mod tests {
         let scanner = ProjectScanner::new(registry, ScanOptions::default());
 
         let projects = scanner.scan(tmp.path());
-        let cargo = projects
-            .iter()
-            .find(|p| p.project_type == "cargo")
-            .unwrap();
+        let cargo = projects.iter().find(|p| p.project_type == "cargo").unwrap();
 
         assert_eq!(cargo.artifact_size, 1000);
     }

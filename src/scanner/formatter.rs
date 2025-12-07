@@ -134,7 +134,14 @@ fn format_tree_recursive(
 
         for (i, child) in children_to_show.iter().enumerate() {
             let is_last_child = i == total - 1 && !has_more;
-            format_tree_recursive(child, output, &new_prefix, is_last_child, depth + 1, options);
+            format_tree_recursive(
+                child,
+                output,
+                &new_prefix,
+                is_last_child,
+                depth + 1,
+                options,
+            );
         }
 
         // Show truncation indicator if needed
@@ -342,8 +349,10 @@ mod tests {
     #[test]
     fn test_format_tree_error_entry() {
         let mut root = DirEntry::new_dir(PathBuf::from("/test"), None);
-        root.children
-            .push(DirEntry::new_error(PathBuf::from("/test/forbidden"), "Permission denied".to_string()));
+        root.children.push(DirEntry::new_error(
+            PathBuf::from("/test/forbidden"),
+            "Permission denied".to_string(),
+        ));
         root.recalculate_totals();
 
         let options = FormatOptions::default();
@@ -374,7 +383,10 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         // subdir should have more indentation than root
         let subdir_line = lines.iter().find(|l| l.contains("subdir")).unwrap();
-        let root_line = lines.iter().find(|l| l.contains("test") && !l.contains("subdir")).unwrap();
+        let root_line = lines
+            .iter()
+            .find(|l| l.contains("test") && !l.contains("subdir"))
+            .unwrap();
 
         // subdir should appear after more spaces than root name
         assert!(subdir_line.find("subdir").unwrap() > root_line.find("test").unwrap());

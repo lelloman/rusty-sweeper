@@ -43,14 +43,7 @@ fn test_monitor_once_with_custom_mount() {
 fn test_monitor_once_multiple_mounts() {
     rusty_sweeper()
         .args([
-            "monitor",
-            "--once",
-            "--notify",
-            "stderr",
-            "--mount",
-            "/",
-            "--mount",
-            "/home",
+            "monitor", "--once", "--notify", "stderr", "--mount", "/", "--mount", "/home",
         ])
         .assert()
         .success();

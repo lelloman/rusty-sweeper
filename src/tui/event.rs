@@ -212,10 +212,22 @@ mod tests {
         let mut app = App::new(PathBuf::from("/"));
         app.mode = Mode::Search;
 
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
+        );
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+        );
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+        );
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
+        );
 
         assert_eq!(app.search_query, "test");
     }
@@ -226,7 +238,10 @@ mod tests {
         app.mode = Mode::Search;
         app.search_query = "test".to_string();
 
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
 
         assert_eq!(app.search_query, "tes");
     }
@@ -291,7 +306,10 @@ mod tests {
         let mut app = App::new(PathBuf::from("/"));
         app.mode = Mode::Confirm(ConfirmAction::Delete);
 
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+        );
 
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -301,7 +319,10 @@ mod tests {
         let mut app = App::new(PathBuf::from("/"));
         app.mode = Mode::Confirm(ConfirmAction::Delete);
 
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        );
 
         assert_eq!(app.mode, Mode::Normal);
     }

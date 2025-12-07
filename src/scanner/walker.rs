@@ -15,7 +15,10 @@ use super::size::{apparent_size, disk_usage};
 #[derive(Debug, Clone)]
 pub enum ScanUpdate {
     /// Partial tree with current progress. `scanning` is the name of the entry being scanned.
-    Progress { tree: DirEntry, scanning: Option<String> },
+    Progress {
+        tree: DirEntry,
+        scanning: Option<String>,
+    },
     /// Scan finished successfully.
     Complete { tree: DirEntry },
     /// Error occurred during scan.
@@ -61,8 +64,7 @@ pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
             Err(err) => {
                 // Handle permission errors gracefully
                 if let Some(path) = err.path() {
-                    let error_entry =
-                        DirEntry::new_error(path.to_path_buf(), err.to_string());
+                    let error_entry = DirEntry::new_error(path.to_path_buf(), err.to_string());
                     entries.insert(path.to_path_buf(), error_entry);
                 }
                 continue;
@@ -227,7 +229,10 @@ fn scan_dir_recursive_parallel(
     // Check if we've reached the depth limit - if so, return empty directory
     if let Some(max_depth) = options.max_depth {
         if depth >= max_depth {
-            return Ok(DirEntry::new_dir(path.to_path_buf(), metadata.modified().ok()));
+            return Ok(DirEntry::new_dir(
+                path.to_path_buf(),
+                metadata.modified().ok(),
+            ));
         }
     }
 
@@ -517,7 +522,10 @@ mod tests {
 
     #[test]
     fn test_scan_nonexistent_path() {
-        let result = scan_directory(Path::new("/nonexistent/path/12345"), &ScanOptions::default());
+        let result = scan_directory(
+            Path::new("/nonexistent/path/12345"),
+            &ScanOptions::default(),
+        );
         assert!(result.is_err());
     }
 

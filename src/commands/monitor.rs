@@ -5,8 +5,8 @@ use std::time::Duration;
 use crate::cli::MonitorArgs;
 use crate::error::{Result, SweeperError};
 use crate::monitor::{
-    cleanup_pid_file, daemon_status, daemonize, install_signal_handlers, stop_daemon,
-    DaemonPaths, MonitorOptions, MonitorService, NotificationBackend,
+    cleanup_pid_file, daemon_status, daemonize, install_signal_handlers, stop_daemon, DaemonPaths,
+    MonitorOptions, MonitorService, NotificationBackend,
 };
 
 pub fn run(args: MonitorArgs) -> Result<()> {
@@ -85,10 +85,7 @@ fn handle_stop(paths: &DaemonPaths) -> Result<()> {
             println!("No monitor daemon running");
             Ok(())
         }
-        Err(e) => Err(SweeperError::Other(format!(
-            "Failed to stop daemon: {}",
-            e
-        ))),
+        Err(e) => Err(SweeperError::Other(format!("Failed to stop daemon: {}", e))),
     }
 }
 
@@ -125,14 +122,26 @@ mod tests {
 
     #[test]
     fn test_parse_backend_auto() {
-        assert!(matches!(parse_backend("auto"), Ok(NotificationBackend::Auto)));
-        assert!(matches!(parse_backend("AUTO"), Ok(NotificationBackend::Auto)));
+        assert!(matches!(
+            parse_backend("auto"),
+            Ok(NotificationBackend::Auto)
+        ));
+        assert!(matches!(
+            parse_backend("AUTO"),
+            Ok(NotificationBackend::Auto)
+        ));
     }
 
     #[test]
     fn test_parse_backend_dbus() {
-        assert!(matches!(parse_backend("dbus"), Ok(NotificationBackend::DBus)));
-        assert!(matches!(parse_backend("DBus"), Ok(NotificationBackend::DBus)));
+        assert!(matches!(
+            parse_backend("dbus"),
+            Ok(NotificationBackend::DBus)
+        ));
+        assert!(matches!(
+            parse_backend("DBus"),
+            Ok(NotificationBackend::DBus)
+        ));
     }
 
     #[test]

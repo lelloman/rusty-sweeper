@@ -146,8 +146,14 @@ mod tests {
         assert_eq!(AlertLevel::from_percent(80.0, 80, 90), AlertLevel::Warning);
         assert_eq!(AlertLevel::from_percent(85.0, 80, 90), AlertLevel::Warning);
         assert_eq!(AlertLevel::from_percent(90.0, 80, 90), AlertLevel::Critical);
-        assert_eq!(AlertLevel::from_percent(95.0, 80, 90), AlertLevel::Emergency);
-        assert_eq!(AlertLevel::from_percent(99.0, 80, 90), AlertLevel::Emergency);
+        assert_eq!(
+            AlertLevel::from_percent(95.0, 80, 90),
+            AlertLevel::Emergency
+        );
+        assert_eq!(
+            AlertLevel::from_percent(99.0, 80, 90),
+            AlertLevel::Emergency
+        );
     }
 
     #[test]
@@ -162,8 +168,8 @@ mod tests {
         let status = DiskStatus {
             mount_point: PathBuf::from("/"),
             device: Some("/dev/sda1".to_string()),
-            total: 1024 * 1024 * 1024 * 100, // 100 GiB
-            used: 1024 * 1024 * 1024 * 80,   // 80 GiB
+            total: 1024 * 1024 * 1024 * 100,    // 100 GiB
+            used: 1024 * 1024 * 1024 * 80,      // 80 GiB
             available: 1024 * 1024 * 1024 * 20, // 20 GiB
             percent: 80.0,
         };
@@ -186,7 +192,13 @@ mod tests {
     fn test_urgency_mapping() {
         assert_eq!(AlertLevel::Normal.urgency(), NotificationUrgency::Low);
         assert_eq!(AlertLevel::Warning.urgency(), NotificationUrgency::Normal);
-        assert_eq!(AlertLevel::Critical.urgency(), NotificationUrgency::Critical);
-        assert_eq!(AlertLevel::Emergency.urgency(), NotificationUrgency::Critical);
+        assert_eq!(
+            AlertLevel::Critical.urgency(),
+            NotificationUrgency::Critical
+        );
+        assert_eq!(
+            AlertLevel::Emergency.urgency(),
+            NotificationUrgency::Critical
+        );
     }
 }

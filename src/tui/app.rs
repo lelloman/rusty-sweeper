@@ -8,10 +8,10 @@ use std::thread::{self, JoinHandle};
 
 use nix::sys::statvfs::statvfs;
 
-use crate::cleaner::{
-    CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry,
+use crate::cleaner::{CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry};
+use crate::scanner::{
+    scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate,
 };
-use crate::scanner::{scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate};
 use walkdir::WalkDir;
 
 /// The current UI mode.
@@ -552,7 +552,10 @@ impl App {
     pub fn selected_is_project(&self) -> bool {
         if let Some(entry) = self.selected_entry() {
             let registry = DetectorRegistry::new();
-            registry.detectors().iter().any(|d| d.detect(&entry.entry.path))
+            registry
+                .detectors()
+                .iter()
+                .any(|d| d.detect(&entry.entry.path))
         } else {
             false
         }
@@ -1156,7 +1159,10 @@ mod tests {
         app.rebuild_visible_entries();
 
         assert!(app.visible_entries[0].project_type.is_some());
-        assert_eq!(app.visible_entries[0].project_type, Some("Rust".to_string()));
+        assert_eq!(
+            app.visible_entries[0].project_type,
+            Some("Rust".to_string())
+        );
     }
 
     #[test]

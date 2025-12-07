@@ -183,10 +183,7 @@ mod tests {
     #[test]
     fn test_daemon_paths() {
         let paths = DaemonPaths::new();
-        assert!(paths
-            .pid_file
-            .to_string_lossy()
-            .contains("rusty-sweeper"));
+        assert!(paths.pid_file.to_string_lossy().contains("rusty-sweeper"));
         assert!(paths.log_file.to_string_lossy().contains("monitor.log"));
     }
 

@@ -120,10 +120,8 @@ fn test_confirm_clean_snapshot() {
     let mut app = App::new(PathBuf::from("/project"));
 
     let mut root = DirEntry::new_dir(PathBuf::from("/project"), None);
-    root.children.push(DirEntry::new_dir(
-        PathBuf::from("/project/target"),
-        None,
-    ));
+    root.children
+        .push(DirEntry::new_dir(PathBuf::from("/project/target"), None));
     root.recalculate_totals();
 
     app.tree = Some(root);
@@ -169,8 +167,10 @@ fn test_nested_tree_snapshot() {
     root.recalculate_totals();
 
     app.tree = Some(root);
-    app.expanded.insert(PathBuf::from("/nonexistent/snapshot/path"));
-    app.expanded.insert(PathBuf::from("/nonexistent/snapshot/path/subdir"));
+    app.expanded
+        .insert(PathBuf::from("/nonexistent/snapshot/path"));
+    app.expanded
+        .insert(PathBuf::from("/nonexistent/snapshot/path/subdir"));
     app.rebuild_visible_entries();
 
     let output = render_to_string(&app, 80, 24);

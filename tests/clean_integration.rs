@@ -28,16 +28,8 @@ version = "0.1.0"
     .unwrap();
     fs::write(rust_proj.join("src/main.rs"), "fn main() {}").unwrap();
     fs::create_dir_all(rust_proj.join("target/debug")).unwrap();
-    fs::write(
-        rust_proj.join("target/debug/rust-app"),
-        "x".repeat(50000),
-    )
-    .unwrap();
-    fs::write(
-        rust_proj.join("target/debug/deps.rlib"),
-        "x".repeat(30000),
-    )
-    .unwrap();
+    fs::write(rust_proj.join("target/debug/rust-app"), "x".repeat(50000)).unwrap();
+    fs::write(rust_proj.join("target/debug/deps.rlib"), "x".repeat(30000)).unwrap();
 
     // Node.js/npm project
     let node_proj = root.join("web-app");
@@ -54,11 +46,7 @@ version = "0.1.0"
     // Gradle/Android project
     let gradle_proj = root.join("android-app");
     fs::create_dir_all(&gradle_proj).unwrap();
-    fs::write(
-        gradle_proj.join("build.gradle"),
-        "apply plugin: 'android'",
-    )
-    .unwrap();
+    fs::write(gradle_proj.join("build.gradle"), "apply plugin: 'android'").unwrap();
     fs::create_dir_all(gradle_proj.join("build/outputs")).unwrap();
     fs::write(
         gradle_proj.join("build/outputs/app.apk"),
@@ -82,11 +70,7 @@ version = "0.1.0"
     fs::create_dir_all(nested.join("src")).unwrap();
     fs::write(nested.join("Cargo.toml"), "[package]\nname = \"util\"").unwrap();
     fs::create_dir_all(nested.join("target/release")).unwrap();
-    fs::write(
-        nested.join("target/release/libutil.so"),
-        "x".repeat(25000),
-    )
-    .unwrap();
+    fs::write(nested.join("target/release/libutil.so"), "x".repeat(25000)).unwrap();
 
     tmp
 }
@@ -158,10 +142,7 @@ fn test_exclude_patterns() {
         .success();
 
     // Excluded project should remain
-    assert!(tmp
-        .path()
-        .join("projects/libs/util-lib/target")
-        .exists());
+    assert!(tmp.path().join("projects/libs/util-lib/target").exists());
 
     // Other projects cleaned
     assert!(!tmp.path().join("rust-app/target").exists());

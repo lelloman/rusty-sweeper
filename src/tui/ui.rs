@@ -50,7 +50,10 @@ fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         } else {
             0
         };
-        format!("Disk: {} / {} ({}% used, {} free)", used_str, total_str, percent, avail_str)
+        format!(
+            "Disk: {} / {} ({}% used, {} free)",
+            used_str, total_str, percent, avail_str
+        )
     });
 
     let header_text = match disk_info {
@@ -105,7 +108,8 @@ fn render_tree_area(app: &App, frame: &mut Frame, area: Rect) {
     let visible_height = inner_area.height as usize;
 
     // Calculate scroll offset to keep selection visible
-    let scroll_offset = calculate_scroll_offset(app.selected, visible_height, app.visible_entries.len());
+    let scroll_offset =
+        calculate_scroll_offset(app.selected, visible_height, app.visible_entries.len());
 
     for (i, visible_entry) in app
         .visible_entries
@@ -117,7 +121,15 @@ fn render_tree_area(app: &App, frame: &mut Frame, area: Rect) {
         let y = inner_area.y + i as u16;
         let is_selected = scroll_offset + i == app.selected;
 
-        render_entry(frame, visible_entry, inner_area.x, y, inner_area.width, max_size, is_selected);
+        render_entry(
+            frame,
+            visible_entry,
+            inner_area.x,
+            y,
+            inner_area.width,
+            max_size,
+            is_selected,
+        );
     }
 }
 
@@ -256,7 +268,10 @@ fn render_entry(
     spans.push(Span::raw(" "));
     spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
     spans.push(Span::styled(bar_filled, size_style));
-    spans.push(Span::styled(bar_empty, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        bar_empty,
+        Style::default().fg(Color::DarkGray),
+    ));
     spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(size_str_padded, size_style));
@@ -365,9 +380,7 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
 
                 let message = format!(
                     "Clean {} project?\n\nArtifacts to remove:\n{}\nTotal: {}\n\n[y]es  [n]o",
-                    preview.project_name,
-                    artifact_lines,
-                    total_str
+                    preview.project_name, artifact_lines, total_str
                 );
 
                 // Height: title + blank + "Artifacts:" + artifacts + blank + total + blank + buttons + borders

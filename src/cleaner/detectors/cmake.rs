@@ -56,7 +56,11 @@ mod tests {
     #[test]
     fn test_cmake_detection_with_build() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.10)").unwrap();
+        fs::write(
+            tmp.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.10)",
+        )
+        .unwrap();
         fs::create_dir(tmp.path().join("build")).unwrap();
 
         assert!(CMakeDetector.detect(tmp.path()));
@@ -65,7 +69,11 @@ mod tests {
     #[test]
     fn test_cmake_no_detection_without_build() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.10)").unwrap();
+        fs::write(
+            tmp.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.10)",
+        )
+        .unwrap();
 
         assert!(!CMakeDetector.detect(tmp.path()));
     }

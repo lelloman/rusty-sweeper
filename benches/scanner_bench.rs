@@ -118,5 +118,10 @@ fn benchmark_with_hidden(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, benchmark_scan, benchmark_deep_scan, benchmark_with_hidden);
+criterion_group!(
+    benches,
+    benchmark_scan,
+    benchmark_deep_scan,
+    benchmark_with_hidden
+);
 criterion_main!(benches);

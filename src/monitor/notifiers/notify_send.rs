@@ -57,8 +57,8 @@ impl Notifier for NotifySendNotifier {
     }
 
     fn send(&self, title: &str, body: &str, urgency: NotificationUrgency) -> Result<()> {
-        let binary = Self::find_binary()
-            .ok_or_else(|| SweeperError::NotFound("notify-send".into()))?;
+        let binary =
+            Self::find_binary().ok_or_else(|| SweeperError::NotFound("notify-send".into()))?;
 
         let urgency_str = match urgency {
             NotificationUrgency::Low => "low",

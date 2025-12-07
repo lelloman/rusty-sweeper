@@ -86,8 +86,7 @@ mod tests {
         let available = notifier.is_available();
 
         // Verify it matches environment
-        let expected =
-            std::env::var("I3SOCK").is_ok() || std::env::var("SWAYSOCK").is_ok();
+        let expected = std::env::var("I3SOCK").is_ok() || std::env::var("SWAYSOCK").is_ok();
         assert_eq!(available, expected);
     }
 

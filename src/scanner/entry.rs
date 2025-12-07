@@ -1,6 +1,6 @@
+use serde::Serialize;
 use std::path::PathBuf;
 use std::time::SystemTime;
-use serde::Serialize;
 
 /// Represents a file or directory with its metadata and size information.
 /// This is the core data structure for the disk scanner.
@@ -189,12 +189,7 @@ mod tests {
 
     #[test]
     fn test_new_file() {
-        let entry = DirEntry::new_file(
-            PathBuf::from("/parent/file.txt"),
-            1024,
-            4096,
-            None,
-        );
+        let entry = DirEntry::new_file(PathBuf::from("/parent/file.txt"), 1024, 4096, None);
         assert!(!entry.is_dir);
         assert_eq!(entry.name, "file.txt");
         assert_eq!(entry.size, 1024);

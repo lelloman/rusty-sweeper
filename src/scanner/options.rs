@@ -24,7 +24,6 @@ pub struct ScanOptions {
 /// These can report incorrect/huge sizes and cause scanning issues.
 pub const LINUX_VIRTUAL_FS_PATHS: &[&str] = &["/proc", "/dev", "/sys", "/run"];
 
-
 impl ScanOptions {
     /// Check if a path should be excluded based on Linux virtual filesystem paths
     pub fn is_linux_virtual_fs(path: &std::path::Path) -> bool {
@@ -111,10 +110,8 @@ mod tests {
 
     #[test]
     fn test_scan_options_exclude() {
-        let opts = ScanOptions::new().with_exclude(vec![
-            "*.tmp".to_string(),
-            "node_modules".to_string(),
-        ]);
+        let opts =
+            ScanOptions::new().with_exclude(vec!["*.tmp".to_string(), "node_modules".to_string()]);
         assert_eq!(opts.exclude_patterns.len(), 2);
         assert_eq!(opts.exclude_patterns[0], "*.tmp");
     }
@@ -149,13 +146,19 @@ mod tests {
 
         // Should detect virtual filesystem paths
         assert!(ScanOptions::is_linux_virtual_fs(Path::new("/proc")));
-        assert!(ScanOptions::is_linux_virtual_fs(Path::new("/proc/1/status")));
+        assert!(ScanOptions::is_linux_virtual_fs(Path::new(
+            "/proc/1/status"
+        )));
         assert!(ScanOptions::is_linux_virtual_fs(Path::new("/dev")));
         assert!(ScanOptions::is_linux_virtual_fs(Path::new("/dev/sda")));
         assert!(ScanOptions::is_linux_virtual_fs(Path::new("/sys")));
-        assert!(ScanOptions::is_linux_virtual_fs(Path::new("/sys/class/net")));
+        assert!(ScanOptions::is_linux_virtual_fs(Path::new(
+            "/sys/class/net"
+        )));
         assert!(ScanOptions::is_linux_virtual_fs(Path::new("/run")));
-        assert!(ScanOptions::is_linux_virtual_fs(Path::new("/run/user/1000")));
+        assert!(ScanOptions::is_linux_virtual_fs(Path::new(
+            "/run/user/1000"
+        )));
 
         // Should not detect regular paths
         assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/home")));

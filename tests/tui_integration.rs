@@ -316,29 +316,17 @@ fn test_tui_sort_order_cycling() {
     app.initial_scan();
 
     // Default is Size
-    assert_eq!(
-        app.sort_order,
-        rusty_sweeper::tui::app::SortOrder::Size
-    );
+    assert_eq!(app.sort_order, rusty_sweeper::tui::app::SortOrder::Size);
 
     // Cycle with s
     handle_key_event(&mut app, key_char('s'));
-    assert_eq!(
-        app.sort_order,
-        rusty_sweeper::tui::app::SortOrder::Name
-    );
+    assert_eq!(app.sort_order, rusty_sweeper::tui::app::SortOrder::Name);
 
     handle_key_event(&mut app, key_char('s'));
-    assert_eq!(
-        app.sort_order,
-        rusty_sweeper::tui::app::SortOrder::Mtime
-    );
+    assert_eq!(app.sort_order, rusty_sweeper::tui::app::SortOrder::Mtime);
 
     handle_key_event(&mut app, key_char('s'));
-    assert_eq!(
-        app.sort_order,
-        rusty_sweeper::tui::app::SortOrder::Size
-    );
+    assert_eq!(app.sort_order, rusty_sweeper::tui::app::SortOrder::Size);
 }
 
 #[test]
@@ -376,8 +364,14 @@ fn test_tui_toggle_hidden() {
         .visible_entries
         .iter()
         .any(|e| e.entry.path == hidden_path);
-    assert!(has_hidden, "Hidden dir should be visible after toggle. Entries: {:?}",
-        app.visible_entries.iter().map(|e| &e.entry.path).collect::<Vec<_>>());
+    assert!(
+        has_hidden,
+        "Hidden dir should be visible after toggle. Entries: {:?}",
+        app.visible_entries
+            .iter()
+            .map(|e| &e.entry.path)
+            .collect::<Vec<_>>()
+    );
 
     // Toggle again
     handle_key_event(&mut app, key_char('.'));

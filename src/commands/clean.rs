@@ -13,7 +13,10 @@ use std::sync::Arc;
 /// Run the clean command.
 pub fn run(args: CleanArgs) -> Result<()> {
     // Resolve to absolute path
-    let path = args.path.canonicalize().unwrap_or_else(|_| args.path.clone());
+    let path = args
+        .path
+        .canonicalize()
+        .unwrap_or_else(|_| args.path.clone());
 
     // Set up registry
     let registry = if let Some(types) = &args.types {
@@ -119,12 +122,24 @@ pub fn run(args: CleanArgs) -> Result<()> {
 
     // Print results
     println!("\nResults:");
-    println!("  Cleaned: {} project{}", summary.success_count, if summary.success_count == 1 { "" } else { "s" });
+    println!(
+        "  Cleaned: {} project{}",
+        summary.success_count,
+        if summary.success_count == 1 { "" } else { "s" }
+    );
     if summary.failed_count > 0 {
-        println!("  Failed:  {} project{}", summary.failed_count, if summary.failed_count == 1 { "" } else { "s" });
+        println!(
+            "  Failed:  {} project{}",
+            summary.failed_count,
+            if summary.failed_count == 1 { "" } else { "s" }
+        );
     }
     if summary.skipped_count > 0 {
-        println!("  Skipped: {} project{}", summary.skipped_count, if summary.skipped_count == 1 { "" } else { "s" });
+        println!(
+            "  Skipped: {} project{}",
+            summary.skipped_count,
+            if summary.skipped_count == 1 { "" } else { "s" }
+        );
     }
     println!("  Freed:   {}", format_size(summary.total_freed, BINARY));
 
