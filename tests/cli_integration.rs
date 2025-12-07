@@ -119,12 +119,12 @@ fn clean_size_only_shows_projects() {
 }
 
 #[test]
-fn monitor_prints_not_implemented() {
+fn monitor_runs_once() {
+    // Monitor is now implemented; verify it runs successfully in --once mode
     rusty_sweeper()
-        .args(["monitor", "--once"])
+        .args(["monitor", "--once", "--notify", "stderr"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("not yet implemented"));
+        .success();
 }
 
 // Note: TUI command is implemented but can't be tested in CI
