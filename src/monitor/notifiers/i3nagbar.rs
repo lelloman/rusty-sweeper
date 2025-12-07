@@ -62,7 +62,7 @@ impl Notifier for I3NagbarNotifier {
             .arg("Dismiss")
             .arg("true")
             .spawn()
-            .map_err(|e| SweeperError::Other(format!("Failed to spawn i3-nagbar: {}", e)))?;
+            .map_err(|e| SweeperError::Command(format!("Failed to spawn i3-nagbar: {}", e)))?;
 
         Ok(())
     }

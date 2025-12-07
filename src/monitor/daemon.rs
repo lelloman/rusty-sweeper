@@ -51,10 +51,7 @@ pub fn daemonize(paths: &DaemonPaths) -> Result<()> {
     // Check if already running
     if let Some(pid) = read_pid_file(&paths.pid_file) {
         if is_process_running(pid) {
-            return Err(SweeperError::Other(format!(
-                "Monitor already running (PID: {})",
-                pid
-            )));
+            return Err(SweeperError::AlreadyRunning(pid as u32));
         }
         // Stale PID file, remove it
         let _ = fs::remove_file(&paths.pid_file);

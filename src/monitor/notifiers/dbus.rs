@@ -1,6 +1,6 @@
 use notify_rust::{Notification, Timeout, Urgency};
 
-use crate::error::{Result, SweeperError};
+use crate::error::Result;
 use crate::monitor::notifier::{format_alert_body, format_alert_title, Notifier};
 use crate::monitor::types::{AlertLevel, DiskStatus, NotificationUrgency};
 
@@ -62,8 +62,7 @@ impl Notifier for DBusNotifier {
             .icon("drive-harddisk")
             .urgency(Self::map_urgency(urgency))
             .timeout(timeout)
-            .show()
-            .map_err(|e| SweeperError::Other(format!("D-Bus notification failed: {}", e)))?;
+            .show()?;
 
         Ok(())
     }

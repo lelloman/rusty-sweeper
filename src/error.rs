@@ -35,6 +35,18 @@ pub enum SweeperError {
     #[error("System call failed: {0}")]
     Nix(#[from] nix::Error),
 
+    #[error("Notification failed: {0}")]
+    Notification(#[from] notify_rust::error::Error),
+
+    #[error("Monitor already running (PID: {0})")]
+    AlreadyRunning(u32),
+
+    #[error("Command failed: {0}")]
+    Command(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -52,6 +64,10 @@ impl SweeperError {
             SweeperError::InvalidPath(_) => 1,
             SweeperError::Json(_) => 1,
             SweeperError::Nix(_) => 1,
+            SweeperError::Notification(_) => 1,
+            SweeperError::AlreadyRunning(_) => 4,
+            SweeperError::Command(_) => 1,
+            SweeperError::NotFound(_) => 1,
             SweeperError::Other(_) => 1,
         }
     }

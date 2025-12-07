@@ -2126,7 +2126,7 @@ echo "  systemctl --user start rusty-sweeper-monitor"
 
 ## Task 15: Add Module Structure
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
@@ -2192,7 +2192,7 @@ pub mod monitor;
 
 ## Task 16: Update Error Types
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
