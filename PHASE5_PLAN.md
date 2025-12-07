@@ -256,7 +256,7 @@ mod tests {
 
 ## Task 3: Implement Disk Usage Checker
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

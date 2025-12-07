@@ -14,6 +14,9 @@ pub enum SweeperError {
         source: std::io::Error,
     },
 
+    #[error("IO error: {0}")]
+    IoSimple(#[from] std::io::Error),
+
     #[error("Permission denied: {0}")]
     PermissionDenied(PathBuf),
 
@@ -29,6 +32,9 @@ pub enum SweeperError {
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("System call failed: {0}")]
+    Nix(#[from] nix::Error),
+
     #[error("{0}")]
     Other(String),
 }
@@ -39,11 +45,13 @@ impl SweeperError {
         match self {
             SweeperError::Config(_) => 2,
             SweeperError::Io { .. } => 1,
+            SweeperError::IoSimple(_) => 1,
             SweeperError::PermissionDenied(_) => 3,
             SweeperError::PathNotFound(_) => 1,
             SweeperError::NotADirectory(_) => 1,
             SweeperError::InvalidPath(_) => 1,
             SweeperError::Json(_) => 1,
+            SweeperError::Nix(_) => 1,
             SweeperError::Other(_) => 1,
         }
     }
