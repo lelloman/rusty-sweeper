@@ -633,7 +633,7 @@ Err(SweeperError::PathNotFound {
 
 ## Task 9: Add Integration Test Fixtures Script
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
