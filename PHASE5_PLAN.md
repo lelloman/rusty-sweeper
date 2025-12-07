@@ -610,7 +610,7 @@ mod tests {
 
 ## Task 5: Implement D-Bus Notifier
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
