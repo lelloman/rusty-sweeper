@@ -56,13 +56,25 @@ pub struct MonitorArgs {
     #[arg(short = 'C', long, default_value = "90", value_name = "PERCENT")]
     pub critical: u8,
 
-    /// Mount point to monitor
-    #[arg(short, long, default_value = "/", value_name = "PATH")]
-    pub mount: PathBuf,
+    /// Mount points to monitor (can be specified multiple times)
+    #[arg(short, long, value_name = "PATH")]
+    pub mount: Vec<PathBuf>,
 
     /// Check once and exit
     #[arg(long)]
     pub once: bool,
+
+    /// Stop running daemon
+    #[arg(long)]
+    pub stop: bool,
+
+    /// Show daemon status
+    #[arg(long)]
+    pub status: bool,
+
+    /// Notification backend (auto, dbus, notify-send, stderr)
+    #[arg(long, default_value = "auto", value_name = "BACKEND")]
+    pub notify: String,
 }
 
 #[derive(Args, Debug)]

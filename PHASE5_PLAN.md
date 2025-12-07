@@ -1825,7 +1825,7 @@ mod tests {
 
 ## Task 13: Implement CLI Subcommand
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 

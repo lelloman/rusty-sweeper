@@ -20,8 +20,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Monitor(args) => {
             tracing::info!(?args, "Starting monitor");
-            println!("Monitor command not yet implemented");
-            // TODO: Phase 5
+            commands::monitor::run(args)?;
         }
         Command::Clean(args) => {
             tracing::info!(?args, "Starting clean");
