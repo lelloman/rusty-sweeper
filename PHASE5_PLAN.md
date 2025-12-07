@@ -1016,7 +1016,7 @@ mod tests {
 
 ## Task 8: Implement Stderr Fallback
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
