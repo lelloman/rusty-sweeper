@@ -47,7 +47,7 @@ nix = { version = "0.29", features = ["fs", "signal", "process"] }
 
 ## Task 2: Define Monitor Data Structures
 
-**Status**: `[ ]`
+**Status**: `[x]`
 
 ### Description
 
