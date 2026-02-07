@@ -80,14 +80,14 @@ fn test_scan_finds_all_projects() {
     let tmp = create_test_workspace();
 
     rusty_sweeper()
-        .args(["clean", "--size-only"])
+        .args(["clean", "--size-only", "--types=cargo,npm,gradle"])
         .arg(tmp.path())
         .assert()
         .success()
         .stdout(predicate::str::contains("cargo"))
         .stdout(predicate::str::contains("npm"))
         .stdout(predicate::str::contains("gradle"))
-        .stdout(predicate::str::contains("4 project"));
+        .stdout(predicate::str::contains("4 item"));
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn test_clean_removes_artifacts() {
     let tmp = create_test_workspace();
 
     rusty_sweeper()
-        .args(["clean", "--force"])
+        .args(["clean", "--force", "--types=cargo,npm,gradle"])
         .arg(tmp.path())
         .assert()
         .success();
@@ -136,7 +136,12 @@ fn test_exclude_patterns() {
     let tmp = create_test_workspace();
 
     rusty_sweeper()
-        .args(["clean", "--force", "--exclude=projects"])
+        .args([
+            "clean",
+            "--force",
+            "--exclude=projects",
+            "--types=cargo,npm,gradle",
+        ])
         .arg(tmp.path())
         .assert()
         .success();
@@ -202,11 +207,11 @@ fn test_empty_directory() {
     let tmp = TempDir::new().unwrap();
 
     rusty_sweeper()
-        .args(["clean", "--size-only"])
+        .args(["clean", "--size-only", "--types=cargo"])
         .arg(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("No projects"));
+        .stdout(predicate::str::contains("No cleanable artifacts"));
 }
 
 #[test]
@@ -214,12 +219,17 @@ fn test_max_depth_limiting() {
     let tmp = create_test_workspace();
 
     rusty_sweeper()
-        .args(["clean", "--size-only", "--max-depth=1"])
+        .args([
+            "clean",
+            "--size-only",
+            "--max-depth=1",
+            "--types=cargo,npm,gradle",
+        ])
         .arg(tmp.path())
         .assert()
         .success()
         // Should find top-level projects but not nested one
-        .stdout(predicate::str::contains("3 project"));
+        .stdout(predicate::str::contains("3 item"));
 }
 
 #[test]
@@ -231,7 +241,7 @@ fn test_invalid_types_filter() {
         .arg(tmp.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("No valid project types"));
+        .stderr(predicate::str::contains("No valid types"));
 }
 
 #[test]
@@ -269,7 +279,7 @@ fn test_parallel_cleaning() {
 
     // Test with different job counts
     rusty_sweeper()
-        .args(["clean", "--force", "--jobs=1"])
+        .args(["clean", "--force", "--jobs=1", "--types=cargo,npm,gradle"])
         .arg(tmp.path())
         .assert()
         .success();

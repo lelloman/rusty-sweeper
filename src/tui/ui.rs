@@ -178,6 +178,64 @@ fn render_entry(
     max_size: u64,
     is_selected: bool,
 ) {
+    let area = Rect::new(x, y, width, 1);
+
+    // Render separator line
+    if entry.is_separator {
+        let separator = "─".repeat(width as usize);
+        let line = Line::from(Span::styled(
+            separator,
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    // Render system resource entry
+    if let Some(resource) = &entry.system_resource {
+        let icon = "⚙ ";
+        let item_info = resource
+            .item_count
+            .map(|n| format!(" ({} items)", n))
+            .unwrap_or_default();
+
+        let size_width = 10;
+        let size_str = humansize::format_size(resource.size, humansize::BINARY);
+        let size_str_padded = format!("{:>width$}", size_str, width = size_width);
+
+        // Calculate name area width (no size bar for system resources)
+        // Layout: icon + name + item_info + padding + size
+        let suffix_len = size_width + 1; // size + 1 space before size
+        let prefix_len = icon.chars().count();
+        let name_area_width = (width as usize).saturating_sub(prefix_len + suffix_len);
+
+        let display_name = &resource.display_name;
+        let used = display_name.chars().count() + item_info.chars().count();
+        let padding = " ".repeat(name_area_width.saturating_sub(used));
+
+        let name_style = Style::default().fg(Color::Cyan).bold();
+        let info_style = Style::default().fg(Color::DarkGray);
+        let size_style = Style::default().fg(Color::Yellow);
+
+        let spans = vec![
+            Span::styled(icon, name_style),
+            Span::styled(display_name.clone(), name_style),
+            Span::styled(item_info, info_style),
+            Span::raw(padding),
+            Span::raw(" "),
+            Span::styled(size_str_padded, size_style),
+        ];
+
+        let mut line = Line::from(spans);
+        if is_selected {
+            line = line.style(Style::default().bg(Color::DarkGray));
+        }
+
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    // Render regular tree entry
     let indent = "  ".repeat(entry.depth);
 
     // Expand/collapse icon
@@ -283,7 +341,6 @@ fn render_entry(
         line = line.style(Style::default().bg(Color::DarkGray));
     }
 
-    let area = Rect::new(x, y, width, 1);
     frame.render_widget(Paragraph::new(line), area);
 }
 
@@ -371,6 +428,10 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
             if let Some(preview) = &app.clean_preview {
                 let total_str = humansize::format_size(preview.total_size, humansize::BINARY);
 
+                let is_system_resource = app
+                    .selected_entry()
+                    .is_some_and(|e| e.system_resource.is_some());
+
                 // Build artifact list
                 let mut artifact_lines = String::new();
                 for (name, size) in &preview.artifacts {
@@ -378,15 +439,28 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                     artifact_lines.push_str(&format!("  {} ({})\n", name, size_str));
                 }
 
-                let message = format!(
-                    "Clean {} project?\n\nArtifacts to remove:\n{}\nTotal: {}\n\n[y]es  [n]o",
-                    preview.project_name, artifact_lines, total_str
-                );
+                let (title, message) = if is_system_resource {
+                    (
+                        " Clean Resource ",
+                        format!(
+                            "Clean {}?\n\n{}\nTotal: {}\n\n[y]es  [n]o",
+                            preview.project_name, artifact_lines, total_str
+                        ),
+                    )
+                } else {
+                    (
+                        " Clean Project ",
+                        format!(
+                            "Clean {} project?\n\nArtifacts to remove:\n{}\nTotal: {}\n\n[y]es  [n]o",
+                            preview.project_name, artifact_lines, total_str
+                        ),
+                    )
+                };
 
                 // Height: title + blank + "Artifacts:" + artifacts + blank + total + blank + buttons + borders
                 let height = (7 + preview.artifacts.len()).min(15) as u16;
 
-                (" Clean Project ", message, height)
+                (title, message, height)
             } else {
                 (" Clean Project ", "No preview available".to_string(), 5u16)
             }

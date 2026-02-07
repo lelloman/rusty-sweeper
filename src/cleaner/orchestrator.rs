@@ -3,6 +3,7 @@
 use crate::cleaner::detector::DetectedProject;
 use crate::cleaner::executor::{CleanExecutor, CleanOptions, CleanResult};
 use crate::cleaner::registry::DetectorRegistry;
+use crate::cleaner::system_cleaner::SystemCleanResult;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -59,6 +60,24 @@ pub struct CleanSummary {
     pub skipped_count: usize,
     /// Total bytes freed.
     pub total_freed: u64,
+}
+
+impl CleanSummary {
+    /// Accumulate a system clean result into this summary.
+    pub fn add_system_result(&mut self, result: &SystemCleanResult) {
+        match result {
+            SystemCleanResult::Success { freed_bytes, .. } => {
+                self.success_count += 1;
+                self.total_freed += freed_bytes;
+            }
+            SystemCleanResult::Failed { .. } => {
+                self.failed_count += 1;
+            }
+            SystemCleanResult::Skipped { .. } => {
+                self.skipped_count += 1;
+            }
+        }
+    }
 }
 
 /// Orchestrator for parallel cleaning of multiple projects.
@@ -298,5 +317,46 @@ mod tests {
 
         let results = orchestrator.clean_all(projects, None);
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_add_system_result() {
+        use crate::cleaner::system_cleaner::DetectedSystemResource;
+
+        let mut summary = CleanSummary::default();
+
+        let resource = DetectedSystemResource {
+            resource_id: "test".to_string(),
+            display_name: "Test".to_string(),
+            category: "test".to_string(),
+            size: 500,
+            description: "test".to_string(),
+            item_count: None,
+        };
+
+        summary.add_system_result(&SystemCleanResult::Success {
+            resource: resource.clone(),
+            freed_bytes: 500,
+        });
+        assert_eq!(summary.success_count, 1);
+        assert_eq!(summary.total_freed, 500);
+
+        summary.add_system_result(&SystemCleanResult::Failed {
+            resource: resource.clone(),
+            error: "err".to_string(),
+        });
+        assert_eq!(summary.failed_count, 1);
+
+        summary.add_system_result(&SystemCleanResult::Skipped {
+            resource,
+            reason: "skip".to_string(),
+        });
+        assert_eq!(summary.skipped_count, 1);
+
+        // Totals accumulated correctly
+        assert_eq!(summary.success_count, 1);
+        assert_eq!(summary.failed_count, 1);
+        assert_eq!(summary.skipped_count, 1);
+        assert_eq!(summary.total_freed, 500);
     }
 }

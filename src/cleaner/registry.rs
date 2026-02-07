@@ -1,6 +1,7 @@
 //! Detector registry for managing project detectors.
 
 use crate::cleaner::detectors::all_detectors;
+use crate::cleaner::system_registry::all_system_cleaner_ids;
 use crate::cleaner::ProjectDetector;
 use std::collections::HashSet;
 
@@ -98,6 +99,13 @@ impl Clone for DetectorRegistry {
     }
 }
 
+/// Return all valid type IDs (project detectors + system cleaners).
+pub fn all_valid_type_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = all_detectors().iter().map(|d| d.id()).collect();
+    ids.extend(all_system_cleaner_ids());
+    ids
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +191,14 @@ mod tests {
         assert_eq!(cloned.len(), 2);
         assert!(cloned.get("cargo").is_some());
         assert!(cloned.get("npm").is_some());
+    }
+
+    #[test]
+    fn test_all_valid_type_ids() {
+        let ids = all_valid_type_ids();
+        assert!(ids.contains(&"cargo"));
+        assert!(ids.contains(&"npm"));
+        assert!(ids.contains(&"docker"));
+        assert_eq!(ids.len(), 10); // 9 project types + 1 system cleaner
     }
 }

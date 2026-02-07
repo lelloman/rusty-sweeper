@@ -31,6 +31,7 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
 
     // Initialize app and start background scan
     let mut app = App::new(root);
+    app.detect_system = true;
     app.start_initial_scan();
 
     // Main loop

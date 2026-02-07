@@ -8,7 +8,10 @@ use std::thread::{self, JoinHandle};
 
 use nix::sys::statvfs::statvfs;
 
-use crate::cleaner::{CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectorRegistry};
+use crate::cleaner::{
+    CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectedSystemResource,
+    DetectorRegistry, SystemCleanerRegistry,
+};
 use crate::scanner::{
     scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate,
 };
@@ -59,6 +62,10 @@ pub struct VisibleEntry {
     pub is_expanded: bool,
     /// Project type display name, if this is a detected project.
     pub project_type: Option<String>,
+    /// System resource, if this entry represents a system-level cleanable resource.
+    pub system_resource: Option<DetectedSystemResource>,
+    /// Whether this entry is a visual separator line.
+    pub is_separator: bool,
 }
 
 /// Delete a file or directory.
@@ -93,6 +100,17 @@ fn detect_project_type(path: &Path) -> Option<String> {
             return Some(short_name.to_string());
         }
     }
+
+    // Fallback: detect Docker projects by Dockerfile/compose files
+    if path.join("Dockerfile").exists()
+        || path.join("docker-compose.yml").exists()
+        || path.join("docker-compose.yaml").exists()
+        || path.join("compose.yml").exists()
+        || path.join("compose.yaml").exists()
+    {
+        return Some("Docker".to_string());
+    }
+
     None
 }
 
@@ -148,6 +166,12 @@ pub struct App {
     /// Preview info for clean confirmation.
     pub clean_preview: Option<CleanPreview>,
 
+    /// Detected system-level resources (e.g., Docker build cache).
+    pub system_resources: Vec<DetectedSystemResource>,
+
+    /// Whether to detect system-level resources (Docker, etc.).
+    pub detect_system: bool,
+
     /// Receiver for progressive scan updates.
     scan_receiver: Option<Receiver<ScanUpdate>>,
 
@@ -173,6 +197,8 @@ impl App {
             status_message: None,
             scanning: false,
             clean_preview: None,
+            system_resources: Vec::new(),
+            detect_system: false,
             scan_receiver: None,
             scan_thread: None,
         }
@@ -187,6 +213,31 @@ impl App {
     pub fn rebuild_visible_entries(&mut self) {
         self.visible_entries.clear();
 
+        // Prepend system resources (if any) before the directory tree
+        let dummy_entry = DirEntry::new_dir(PathBuf::from(""), None);
+        for resource in &self.system_resources {
+            self.visible_entries.push(VisibleEntry {
+                entry: dummy_entry.clone(),
+                depth: 0,
+                is_expanded: false,
+                project_type: None,
+                system_resource: Some(resource.clone()),
+                is_separator: false,
+            });
+        }
+
+        // Add separator if we have system resources and tree data
+        if !self.system_resources.is_empty() && self.tree.is_some() {
+            self.visible_entries.push(VisibleEntry {
+                entry: dummy_entry,
+                depth: 0,
+                is_expanded: false,
+                project_type: None,
+                system_resource: None,
+                is_separator: true,
+            });
+        }
+
         if let Some(tree) = self.tree.clone() {
             self.flatten_tree(&tree, 0);
         }
@@ -195,6 +246,15 @@ impl App {
         if !self.visible_entries.is_empty() && self.selected >= self.visible_entries.len() {
             self.selected = self.visible_entries.len() - 1;
         }
+    }
+
+    /// Detect system-level resources (e.g., Docker build cache, images).
+    pub fn detect_system_resources(&mut self) {
+        if !self.detect_system {
+            return;
+        }
+        let registry = SystemCleanerRegistry::new();
+        self.system_resources = registry.detect_all();
     }
 
     /// Recursively flatten the tree into visible_entries.
@@ -227,6 +287,8 @@ impl App {
             depth,
             is_expanded,
             project_type,
+            system_resource: None,
+            is_separator: false,
         });
 
         // If expanded and has children, recurse
@@ -268,6 +330,10 @@ impl App {
     /// Toggle expansion state of selected entry.
     pub fn toggle_selected(&mut self) {
         if let Some(entry) = self.selected_entry().cloned() {
+            // No-op for system resources and separators
+            if entry.system_resource.is_some() || entry.is_separator {
+                return;
+            }
             if entry.entry.is_dir {
                 if self.expanded.contains(&entry.entry.path) {
                     self.expanded.remove(&entry.entry.path);
@@ -282,23 +348,38 @@ impl App {
     // Navigation methods (stubs - will be fully implemented in Task 4.7)
 
     /// Move selection by delta, clamping to valid range.
+    /// Skips over separator entries.
     pub fn move_selection(&mut self, delta: i32) {
         if self.visible_entries.is_empty() {
             return;
         }
 
+        let max_idx = self.visible_entries.len() - 1;
         let new_selected = if delta < 0 {
             self.selected.saturating_sub(delta.unsigned_abs() as usize)
         } else {
             self.selected.saturating_add(delta as usize)
         };
 
-        self.selected = new_selected.min(self.visible_entries.len() - 1);
+        self.selected = new_selected.min(max_idx);
+
+        // Skip over separator entries
+        if self.visible_entries[self.selected].is_separator {
+            if delta > 0 && self.selected < max_idx {
+                self.selected += 1;
+            } else if delta < 0 && self.selected > 0 {
+                self.selected -= 1;
+            }
+        }
     }
 
     /// Expand selected directory.
     pub fn expand_selected(&mut self) {
         if let Some(entry) = self.selected_entry().cloned() {
+            // No-op for system resources and separators
+            if entry.system_resource.is_some() || entry.is_separator {
+                return;
+            }
             if entry.entry.is_dir && !entry.is_expanded {
                 self.expanded.insert(entry.entry.path);
                 self.rebuild_visible_entries();
@@ -309,6 +390,10 @@ impl App {
     /// Collapse selected directory or go to parent.
     pub fn collapse_selected(&mut self) {
         if let Some(entry) = self.selected_entry().cloned() {
+            // No-op for system resources and separators
+            if entry.system_resource.is_some() || entry.is_separator {
+                return;
+            }
             if entry.is_expanded {
                 self.expanded.remove(&entry.entry.path);
                 self.rebuild_visible_entries();
@@ -321,9 +406,13 @@ impl App {
     /// Move selection to parent directory.
     pub fn go_to_parent(&mut self) {
         if let Some(entry) = self.selected_entry() {
+            // No-op for system resources and separators
+            if entry.system_resource.is_some() || entry.is_separator {
+                return;
+            }
             if let Some(parent) = entry.entry.path.parent() {
                 for (i, ve) in self.visible_entries.iter().enumerate() {
-                    if ve.entry.path == parent {
+                    if ve.system_resource.is_none() && !ve.is_separator && ve.entry.path == parent {
                         self.selected = i;
                         break;
                     }
@@ -352,6 +441,12 @@ impl App {
         if self.scanning {
             return;
         }
+
+        // Detect system resources first — this is fast (e.g., `docker system df`)
+        // and lets the user see actionable cleanup targets immediately while the
+        // directory tree populates in the background.
+        self.detect_system_resources();
+        self.rebuild_visible_entries();
 
         self.scanning = true;
         self.status_message = Some("Scanning...".to_string());
@@ -423,6 +518,9 @@ impl App {
     pub fn trigger_rescan(&mut self) {
         self.scanning = true;
 
+        // Detect system resources first — fast query that gives immediate results
+        self.detect_system_resources();
+
         // Always scan with hidden files included so we can toggle visibility in the UI
         let options = ScanOptions::default().with_hidden(true);
         match scan_directory(&self.root, &options) {
@@ -462,13 +560,24 @@ impl App {
 
     /// Delete the selected entry.
     pub fn delete_selected(&mut self) {
-        let path = match self.selected_entry() {
-            Some(entry) => entry.entry.path.clone(),
+        let entry = match self.selected_entry() {
+            Some(entry) => entry.clone(),
             None => {
                 self.status_message = Some("No entry selected".to_string());
                 return;
             }
         };
+
+        // Cannot delete system resources or separators
+        if entry.system_resource.is_some() {
+            self.status_message = Some("Cannot delete system resources".to_string());
+            return;
+        }
+        if entry.is_separator {
+            return;
+        }
+
+        let path = entry.entry.path;
 
         // Don't allow deleting the root
         if path == self.root {
@@ -487,15 +596,51 @@ impl App {
         }
     }
 
-    /// Clean the selected project.
+    /// Clean the selected project or system resource.
     pub fn clean_selected(&mut self) {
-        let path = match self.selected_entry() {
-            Some(entry) => entry.entry.path.clone(),
+        let entry = match self.selected_entry() {
+            Some(entry) => entry.clone(),
             None => {
                 self.status_message = Some("No entry selected".to_string());
                 return;
             }
         };
+
+        // Handle separator - no-op
+        if entry.is_separator {
+            return;
+        }
+
+        // Handle system resource cleaning
+        if let Some(resource) = &entry.system_resource {
+            let registry = SystemCleanerRegistry::new();
+            if let Some(cleaner) = registry.get_cleaner(&resource.category) {
+                use crate::cleaner::SystemCleanResult;
+                match cleaner.clean(resource, false) {
+                    SystemCleanResult::Success { freed_bytes, .. } => {
+                        let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
+                        self.status_message = Some(format!(
+                            "Cleaned {}, freed {}",
+                            resource.display_name, freed_str
+                        ));
+                        self.detect_system_resources();
+                        self.rebuild_visible_entries();
+                    }
+                    SystemCleanResult::Failed { error, .. } => {
+                        self.status_message = Some(format!("Clean failed: {}", error));
+                    }
+                    SystemCleanResult::Skipped { reason, .. } => {
+                        self.status_message = Some(format!("Clean skipped: {}", reason));
+                    }
+                }
+            } else {
+                self.status_message = Some("No cleaner found for this resource".to_string());
+            }
+            return;
+        }
+
+        // Handle regular project cleaning
+        let path = entry.entry.path;
 
         // Try to detect a project at this path
         let registry = DetectorRegistry::new();
@@ -548,9 +693,17 @@ impl App {
         }
     }
 
-    /// Check if the selected entry is a cleanable project.
+    /// Check if the selected entry is a cleanable project or system resource.
     pub fn selected_is_project(&self) -> bool {
         if let Some(entry) = self.selected_entry() {
+            // System resources are cleanable
+            if entry.system_resource.is_some() {
+                return true;
+            }
+            // Separators are not cleanable
+            if entry.is_separator {
+                return false;
+            }
             let registry = DetectorRegistry::new();
             registry
                 .detectors()
@@ -561,13 +714,36 @@ impl App {
         }
     }
 
-    /// Prepare clean preview for the selected project.
+    /// Prepare clean preview for the selected project or system resource.
     /// Returns true if preview was prepared, false if not a valid project.
     pub fn prepare_clean_preview(&mut self) -> bool {
-        let path = match self.selected_entry() {
-            Some(entry) => entry.entry.path.clone(),
+        let entry = match self.selected_entry() {
+            Some(entry) => entry.clone(),
             None => return false,
         };
+
+        // Separator - not cleanable
+        if entry.is_separator {
+            return false;
+        }
+
+        // System resource preview
+        if let Some(resource) = &entry.system_resource {
+            let item_info = resource
+                .item_count
+                .map(|n| format!("{} items", n))
+                .unwrap_or_else(|| resource.description.clone());
+
+            self.clean_preview = Some(CleanPreview {
+                project_name: resource.display_name.clone(),
+                artifacts: vec![(item_info, resource.size)],
+                total_size: resource.size,
+            });
+            return true;
+        }
+
+        // Regular project preview
+        let path = entry.entry.path;
 
         let registry = DetectorRegistry::new();
         let matching_detector = registry.detectors().iter().find(|d| d.detect(&path));
@@ -1286,5 +1462,176 @@ mod tests {
         // Should have an error status message
         assert!(app.status_message.is_some());
         assert!(app.status_message.as_ref().unwrap().contains("Scan error"));
+    }
+
+    // System resource tests
+
+    fn make_test_resource(id: &str, name: &str, size: u64) -> DetectedSystemResource {
+        DetectedSystemResource {
+            resource_id: id.to_string(),
+            display_name: name.to_string(),
+            category: "docker".to_string(),
+            size,
+            description: "test".to_string(),
+            item_count: Some(10),
+        }
+    }
+
+    #[test]
+    fn test_system_resources_prepended_to_visible_entries() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        // First entry should be system resource
+        assert!(app.visible_entries[0].system_resource.is_some());
+        assert_eq!(
+            app.visible_entries[0]
+                .system_resource
+                .as_ref()
+                .unwrap()
+                .display_name,
+            "Resource 1"
+        );
+
+        // Second should be separator
+        assert!(app.visible_entries[1].is_separator);
+
+        // Third should be tree root
+        assert!(app.visible_entries[2].system_resource.is_none());
+        assert!(!app.visible_entries[2].is_separator);
+        assert_eq!(app.visible_entries[2].entry.name, "root");
+    }
+
+    #[test]
+    fn test_system_resources_no_separator_without_tree() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        // No tree set
+        app.rebuild_visible_entries();
+
+        // Should have resource but no separator
+        assert_eq!(app.visible_entries.len(), 1);
+        assert!(app.visible_entries[0].system_resource.is_some());
+    }
+
+    #[test]
+    fn test_move_selection_skips_separator() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        // entries: [resource, separator, root, dir_b, dir_a]
+        // Start at resource (index 0)
+        app.selected = 0;
+
+        // Move down — should skip separator (index 1), land on root (index 2)
+        app.move_selection(1);
+        assert!(!app.visible_entries[app.selected].is_separator);
+
+        // Move back up from root (index 2) — should skip separator, land on resource (index 0)
+        app.move_selection(-1);
+        assert!(!app.visible_entries[app.selected].is_separator);
+    }
+
+    #[test]
+    fn test_selected_is_project_system_resource() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        // Select system resource
+        app.selected = 0;
+        assert!(app.selected_is_project());
+    }
+
+    #[test]
+    fn test_selected_is_project_separator() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        // Force select separator
+        app.selected = 1;
+        assert!(!app.selected_is_project());
+    }
+
+    #[test]
+    fn test_toggle_noop_on_system_resource() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        let count_before = app.visible_entries.len();
+        app.selected = 0; // system resource
+        app.toggle_selected();
+        assert_eq!(app.visible_entries.len(), count_before);
+    }
+
+    #[test]
+    fn test_expand_noop_on_separator() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        let count_before = app.visible_entries.len();
+        app.selected = 1; // separator
+        app.expand_selected();
+        assert_eq!(app.visible_entries.len(), count_before);
+    }
+
+    #[test]
+    fn test_delete_blocked_on_system_resource() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        app.selected = 0; // system resource
+        app.delete_selected();
+
+        assert!(app.status_message.is_some());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Cannot delete system resources"));
+    }
+
+    #[test]
+    fn test_prepare_clean_preview_system_resource() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Docker Build Cache", 5000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        app.selected = 0; // system resource
+        let result = app.prepare_clean_preview();
+        assert!(result);
+        assert!(app.clean_preview.is_some());
+
+        let preview = app.clean_preview.as_ref().unwrap();
+        assert_eq!(preview.project_name, "Docker Build Cache");
+        assert_eq!(preview.total_size, 5000);
+    }
+
+    #[test]
+    fn test_prepare_clean_preview_separator() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.system_resources = vec![make_test_resource("res1", "Resource 1", 1000)];
+        app.tree = Some(create_test_tree());
+        app.rebuild_visible_entries();
+
+        app.selected = 1; // separator
+        let result = app.prepare_clean_preview();
+        assert!(!result);
     }
 }

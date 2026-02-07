@@ -78,8 +78,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
 
         // Actions
         KeyCode::Char('d') | KeyCode::Delete => {
-            if app.selected_entry().is_some() {
-                app.mode = Mode::Confirm(ConfirmAction::Delete);
+            if let Some(entry) = app.selected_entry() {
+                // Don't allow delete on system resources or separators
+                if entry.system_resource.is_none() && !entry.is_separator {
+                    app.mode = Mode::Confirm(ConfirmAction::Delete);
+                }
             }
         }
         KeyCode::Char('c') => {

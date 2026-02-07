@@ -5,6 +5,7 @@
 
 use insta::assert_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
+use rusty_sweeper::cleaner::DetectedSystemResource;
 use rusty_sweeper::scanner::DirEntry;
 use rusty_sweeper::tui::app::{ConfirmAction, Mode};
 use rusty_sweeper::tui::ui::render;
@@ -204,6 +205,48 @@ fn test_project_indicator_snapshot() {
         app.visible_entries[2].project_type = Some("npm".to_string());
         // visible_entries[3] is "documents" with no project type
     }
+
+    let output = render_to_string(&app, 80, 24);
+    assert_snapshot!(output);
+}
+
+#[test]
+fn test_system_resources_snapshot() {
+    let mut app = App::new(PathBuf::from("/nonexistent/snapshot/path"));
+
+    // Simulate detected system resources
+    app.system_resources = vec![
+        DetectedSystemResource {
+            resource_id: "docker-build-cache".to_string(),
+            display_name: "Docker Build Cache".to_string(),
+            category: "docker".to_string(),
+            size: 304_643_072, // ~290.6 MiB
+            description: "Docker build cache layers".to_string(),
+            item_count: Some(314),
+        },
+        DetectedSystemResource {
+            resource_id: "docker-images".to_string(),
+            display_name: "Docker Images".to_string(),
+            category: "docker".to_string(),
+            size: 11_382_169_600, // ~10.6 GiB
+            description: "Docker images".to_string(),
+            item_count: Some(78),
+        },
+    ];
+
+    let mut root = DirEntry::new_dir(PathBuf::from("/nonexistent/snapshot/path"), None);
+    root.children.push(DirEntry::new_file(
+        PathBuf::from("/nonexistent/snapshot/path/file.txt"),
+        1024,
+        4096,
+        None,
+    ));
+    root.recalculate_totals();
+
+    app.tree = Some(root);
+    app.expanded
+        .insert(PathBuf::from("/nonexistent/snapshot/path"));
+    app.rebuild_visible_entries();
 
     let output = render_to_string(&app, 80, 24);
     assert_snapshot!(output);

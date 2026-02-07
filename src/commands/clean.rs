@@ -1,8 +1,9 @@
 //! Clean command implementation.
 
 use crate::cleaner::{
-    CleanOptions, CleanOrchestrator, CleanProgress, CleanResult, DetectorRegistry, ProjectScanner,
-    ScanOptions,
+    all_valid_type_ids, CleanOptions, CleanOrchestrator, CleanProgress, CleanResult,
+    DetectedSystemResource, DetectorRegistry, ProjectScanner, ScanOptions, SystemCleanResult,
+    SystemCleanerRegistry,
 };
 use crate::cli::CleanArgs;
 use anyhow::Result;
@@ -18,21 +19,53 @@ pub fn run(args: CleanArgs) -> Result<()> {
         .canonicalize()
         .unwrap_or_else(|_| args.path.clone());
 
-    // Set up registry
-    let registry = if let Some(types) = &args.types {
-        let types: Vec<&str> = types.iter().map(|s| s.as_str()).collect();
-        DetectorRegistry::with_types(&types)
-    } else {
-        DetectorRegistry::new()
+    // Determine which types were requested
+    let requested_types: Option<Vec<&str>> = args
+        .types
+        .as_ref()
+        .map(|t| t.iter().map(|s| s.as_str()).collect());
+
+    // Check if any requested types are system cleaner types
+    let system_cleaner_ids: Vec<&str> = crate::cleaner::system_registry::all_system_cleaner_ids();
+    let run_system_cleaners = match &requested_types {
+        None => true, // No filter: run everything
+        Some(types) => types.iter().any(|t| system_cleaner_ids.contains(t)),
     };
 
-    if registry.is_empty() {
+    // Filter project types (exclude system cleaner IDs from detector registry)
+    let project_types: Option<Vec<&str>> = requested_types.as_ref().map(|types| {
+        types
+            .iter()
+            .filter(|t| !system_cleaner_ids.contains(t))
+            .copied()
+            .collect()
+    });
+
+    // Set up project detector registry
+    let registry = match &project_types {
+        Some(types) if !types.is_empty() => DetectorRegistry::with_types(types),
+        Some(_) => DetectorRegistry::with_types(&[]), // Only system types requested
+        None => DetectorRegistry::new(),
+    };
+
+    // Set up system cleaner registry
+    let system_registry = if run_system_cleaners {
+        match &requested_types {
+            Some(types) => SystemCleanerRegistry::with_types(types),
+            None => SystemCleanerRegistry::new(),
+        }
+    } else {
+        SystemCleanerRegistry::with_types(&[])
+    };
+
+    // Validate that at least some valid types were requested
+    if registry.is_empty() && system_registry.is_empty() {
         if let Some(types) = &args.types {
             eprintln!(
-                "Error: No valid project types found. Requested: {}",
+                "Error: No valid types found. Requested: {}",
                 types.join(", ")
             );
-            eprintln!("Valid types: {}", DetectorRegistry::new().ids().join(", "));
+            eprintln!("Valid types: {}", all_valid_type_ids().join(", "));
             std::process::exit(2);
         }
     }
@@ -64,24 +97,46 @@ pub fn run(args: CleanArgs) -> Result<()> {
                 "Found {} project(s), but none older than {} days.",
                 before_count, age_days
             );
-            return Ok(());
+            // Don't return early if we also have system resources to check
+            if !run_system_cleaners {
+                return Ok(());
+            }
         }
     }
 
-    if projects.is_empty() {
-        println!("No projects with cleanable artifacts found.");
+    // Detect system resources
+    let system_resources = if run_system_cleaners {
+        system_registry.detect_all()
+    } else {
+        Vec::new()
+    };
+
+    // Check if there's anything to do
+    if projects.is_empty() && system_resources.is_empty() {
+        println!("No cleanable artifacts found.");
         return Ok(());
     }
 
     // Display found projects
-    print_projects_table(&projects);
+    if !projects.is_empty() {
+        print_projects_table(&projects);
+    }
 
-    let total_size: u64 = projects.iter().map(|p| p.artifact_size).sum();
+    // Display system resources
+    if !system_resources.is_empty() {
+        print_system_resources_table(&system_resources);
+    }
+
+    let project_size: u64 = projects.iter().map(|p| p.artifact_size).sum();
+    let system_size: u64 = system_resources.iter().map(|r| r.size).sum();
+    let total_size = project_size + system_size;
+
+    let total_items = projects.len() + system_resources.len();
     println!(
-        "\nTotal: {} in {} project{}",
+        "\nTotal: {} in {} item{}",
         format_size(total_size, BINARY),
-        projects.len(),
-        if projects.len() == 1 { "" } else { "s" }
+        total_items,
+        if total_items == 1 { "" } else { "s" }
     );
 
     if args.size_only {
@@ -117,36 +172,54 @@ pub fn run(args: CleanArgs) -> Result<()> {
         println!("\nCleaning...");
     }
 
+    // Clean projects
     let results = orchestrator.clean_all(projects, Some(progress));
-    let summary = CleanOrchestrator::summarize(&results);
+    let mut summary = CleanOrchestrator::summarize(&results);
+
+    // Clean system resources
+    let mut system_results = Vec::new();
+    for resource in &system_resources {
+        if let Some(cleaner) = system_registry.get_cleaner(&resource.category) {
+            let result = cleaner.clean(resource, args.dry_run);
+            summary.add_system_result(&result);
+            system_results.push(result);
+        }
+    }
 
     // Print results
     println!("\nResults:");
     println!(
-        "  Cleaned: {} project{}",
+        "  Cleaned: {} item{}",
         summary.success_count,
         if summary.success_count == 1 { "" } else { "s" }
     );
     if summary.failed_count > 0 {
         println!(
-            "  Failed:  {} project{}",
+            "  Failed:  {} item{}",
             summary.failed_count,
             if summary.failed_count == 1 { "" } else { "s" }
         );
     }
     if summary.skipped_count > 0 {
         println!(
-            "  Skipped: {} project{}",
+            "  Skipped: {} item{}",
             summary.skipped_count,
             if summary.skipped_count == 1 { "" } else { "s" }
         );
     }
     println!("  Freed:   {}", format_size(summary.total_freed, BINARY));
 
-    // Print failures
+    // Print project failures
     for result in &results {
         if let CleanResult::Failed { project, error } = result {
             eprintln!("  Error cleaning {}: {}", project.path.display(), error);
+        }
+    }
+
+    // Print system failures
+    for result in &system_results {
+        if let SystemCleanResult::Failed { resource, error } = result {
+            eprintln!("  Error cleaning {}: {}", resource.display_name, error);
         }
     }
 
@@ -174,6 +247,26 @@ fn print_projects_table(projects: &[crate::cleaner::DetectedProject]) {
             project.project_type,
             path_display,
             format_size(project.artifact_size, BINARY),
+        );
+    }
+}
+
+fn print_system_resources_table(resources: &[DetectedSystemResource]) {
+    println!("\n  System Resources:");
+    println!("  {:<20} {:<40} {:>10}", "RESOURCE", "DESCRIPTION", "SIZE");
+    println!("  {}", "─".repeat(72));
+
+    for resource in resources {
+        let count_str = resource
+            .item_count
+            .map(|c| format!(" ({} items)", c))
+            .unwrap_or_default();
+
+        println!(
+            "  {:<20} {:<40} {:>10}",
+            resource.display_name,
+            format!("{}{}", resource.description, count_str),
+            format_size(resource.size, BINARY),
         );
     }
 }
