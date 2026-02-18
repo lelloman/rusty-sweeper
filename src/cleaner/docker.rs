@@ -54,7 +54,7 @@ impl SystemCleaner for DockerCleaner {
                 .args(["builder", "prune", "-f"])
                 .output(),
             "docker-images" => Command::new("docker")
-                .args(["image", "prune", "-f"])
+                .args(["image", "prune", "-f", "-a"])
                 .output(),
             _ => {
                 return SystemCleanResult::Skipped {
