@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use std::io;
+use std::path::PathBuf;
 
 use rusty_sweeper::cli::{Cli, Command};
 use rusty_sweeper::commands;
@@ -20,26 +21,27 @@ fn main() -> Result<()> {
 
     // Dispatch to subcommand
     match cli.command {
-        Command::Monitor(args) => {
-            tracing::info!(?args, "Starting monitor");
-            commands::monitor::run(args)?;
-        }
-        Command::Clean(args) => {
+        Some(Command::Clean(args)) => {
             tracing::info!(?args, "Starting clean");
             commands::clean::run(args)?;
         }
-        Command::Scan(args) => {
+        Some(Command::Scan(args)) => {
             tracing::info!(?args, "Starting scan");
             commands::scan::run(args)?;
         }
-        Command::Tui(args) => {
+        Some(Command::Tui(args)) => {
             tracing::info!(?args, "Starting TUI");
             let root = args.path.canonicalize()?;
             rusty_sweeper::tui::run(root)?;
         }
-        Command::Completions(args) => {
+        Some(Command::Completions(args)) => {
             let mut cmd = Cli::command();
             generate(args.shell, &mut cmd, "rusty-sweeper", &mut io::stdout());
+        }
+        None => {
+            let root = PathBuf::from("/");
+            tracing::info!(path = %root.display(), "Starting TUI");
+            rusty_sweeper::tui::run(root)?;
         }
     }
 

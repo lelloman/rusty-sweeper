@@ -10,11 +10,23 @@ is a disk usage management utility that provides:
 .IP \(bu 2
 Fast parallel disk scanning
 .IP \(bu 2
-Project detection and build artifact cleaning (Cargo, npm, Go, Python, etc.)
+Project detection and build artifact cleaning (Cargo, npm, Python, CMake, Gradle, Maven, .NET)
 .IP \(bu 2
 Interactive TUI with ncdu-like interface
 .IP \(bu 2
 Background monitoring with desktop notifications
+.IP \(bu 2
+Docker system cleanup for reclaimable images and build cache
+.SH STATUS
+Current implementation status:
+.IP \(bu 2
+\fBscan\fR, \fBclean\fR, \fBtui\fR, \fBmonitor\fR, and \fBcompletions\fR are implemented
+.IP \(bu 2
+\fBscan --sort mtime\fR is accepted by the CLI but currently falls back to size sorting
+.IP \(bu 2
+The configuration file is loaded and validated, but most command behavior is still driven directly by CLI flags
+.IP \(bu 2
+Go and Bazel detectors exist in the codebase, but command-only cleanup for those project types is not currently surfaced by project scanning
 .SH GLOBAL OPTIONS
 .TP
 .BR \-c ", " \-\-config =\fIPATH\fR
@@ -74,7 +86,7 @@ Maximum recursion depth (default: 10)
 Project types to clean (comma-separated)
 .TP
 .BR \-e ", " \-\-exclude =\fIPATTERNS\fR
-Paths to exclude (glob patterns)
+Paths to exclude (matched by path component name, not full glob semantics)
 .TP
 .BR \-a ", " \-\-age =\fIDAYS\fR
 Only clean projects not modified in N days
@@ -90,6 +102,10 @@ Only report sizes, don't clean
 .SS tui
 Launch interactive TUI.
 .PP
+.B rusty-sweeper
+.PP
+Launch the TUI with default settings.
+.PP
 .B rusty-sweeper tui
 [\fIOPTIONS\fR] [\fIPATH\fR]
 .TP
@@ -98,38 +114,6 @@ Don't cross filesystem boundaries
 .TP
 .B \-\-no-color
 Disable colors
-.SS monitor
-Start disk usage monitoring.
-.PP
-.B rusty-sweeper monitor
-[\fIOPTIONS\fR]
-.TP
-.BR \-d ", " \-\-daemon
-Run as background daemon
-.TP
-.BR \-i ", " \-\-interval =\fISECS\fR
-Check interval in seconds (default: 300)
-.TP
-.BR \-w ", " \-\-warn =\fIPERCENT\fR
-Warning threshold percentage (default: 80)
-.TP
-.BR \-C ", " \-\-critical =\fIPERCENT\fR
-Critical threshold percentage (default: 90)
-.TP
-.BR \-m ", " \-\-mount =\fIPATH\fR
-Mount points to monitor (can be repeated)
-.TP
-.B \-\-once
-Check once and exit
-.TP
-.B \-\-stop
-Stop running daemon
-.TP
-.B \-\-status
-Show daemon status
-.TP
-.B \-\-notify =\fIBACKEND\fR
-Notification backend: auto, dbus, notify-send, stderr
 .SS completions
 Generate shell completions.
 .PP
@@ -157,6 +141,9 @@ Delete selected
 .B c
 Clean project
 .TP
+.B s
+Cycle sort order
+.TP
 .B /
 Search
 .TP
@@ -174,21 +161,37 @@ Quit
 .SH CONFIGURATION
 Configuration file: \fI~/.config/rusty-sweeper/config.toml\fR
 .PP
+This file is currently loaded and validated on startup, but most command behavior is not yet driven from config values.
+.PP
 Example:
 .PP
 .RS
 .nf
 [scanner]
-max_depth = 10
-exclude = ["node_modules", ".git"]
+parallel_threads = 0
+cross_filesystems = false
+use_cache = true
+cache_ttl = 3600
 
 [cleaner]
-types = ["cargo", "npm", "go"]
+project_types = ["cargo", "gradle", "npm", "maven"]
+exclude_patterns = ["**/.git", "**/vendor"]
+min_age_days = 7
+max_depth = 10
+parallel_jobs = 4
 
 [monitor]
 interval = 300
 warn_threshold = 80
 critical_threshold = 90
+mount_points = []
+notification_backend = "auto"
+
+[tui]
+color_scheme = "auto"
+show_hidden = false
+default_sort = "size"
+large_dir_threshold = 1073741824
 .fi
 .RE
 .SH FILES
@@ -210,13 +213,10 @@ Success
 General error
 .TP
 .B 2
-Configuration error
+Invalid cleaner type selection
 .TP
-.B 3
-Permission denied
-.TP
-.B 4
-Monitor already running
+.B 5
+Partial cleanup failure
 .SH EXAMPLES
 .TP
 Scan current directory:
@@ -228,18 +228,21 @@ Find and show cleanable project sizes:
 Clean all Cargo and npm projects older than 30 days:
 .B rusty-sweeper clean -t cargo,npm -a 30 ~/projects
 .TP
+Start the TUI:
+.B rusty-sweeper
+.TP
 Start interactive TUI at home directory:
 .B rusty-sweeper tui ~
 .TP
 Start monitor daemon with custom thresholds:
-.B rusty-sweeper monitor -d -w 70 -C 85
+.B rusty-sweeper-monitor -d -w 70 -C 85
 .TP
 Generate bash completions:
 .B rusty-sweeper completions bash > ~/.bash_completion.d/rusty-sweeper
 .SH AUTHOR
 Written by the rusty-sweeper contributors.
 .SH REPORTING BUGS
-Report bugs at: https://github.com/user/rusty-sweeper/issues
+Report bugs at: https://github.com/lelloman/rusty-sweeper/issues
 .SH SEE ALSO
 .BR ncdu (1),
 .BR du (1),

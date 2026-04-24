@@ -2,10 +2,25 @@
 
 A fast, interactive disk usage analyzer and cleaner for Linux.
 
+## Current Status
+
+Rusty Sweeper is implemented and test-covered across its main command surface:
+
+- `scan` is implemented and supports tree output, JSON output, hidden files, depth limiting, and size/name sorting.
+- `clean` is implemented for local build artifact cleanup and Docker system resources.
+- `rusty-sweeper` launches the TUI by default, including navigation, search, delete, clean, and background scanning.
+- `rusty-sweeper-monitor` is a dedicated monitor binary with one-shot checks, daemon mode, PID/log management, and multiple notification backends.
+
+Current limitations:
+
+- `scan --sort mtime` is accepted by the CLI, but currently falls back to size sorting.
+- The configuration file is loaded and validated, but most command behavior is still driven directly by CLI flags rather than config values.
+- Go and Bazel detectors exist in the codebase, but command-only cleanup for those project types is not currently surfaced by project scanning.
+
 ## Features
 
 - **Disk Scanner**: Analyze disk usage with parallel traversal
-- **Project Cleaner**: Detect and clean build artifacts (Cargo, npm, Go, Python, CMake, Gradle, Maven)
+- **Project Cleaner**: Detect and clean build artifacts (Cargo, npm, Python, CMake, Gradle, Maven, .NET) plus Docker system resources
 - **Interactive TUI**: Navigate and clean directly from the terminal
 - **Monitor Service**: Background daemon with desktop notifications when disk is full
 
@@ -64,13 +79,16 @@ rusty-sweeper clean --types cargo,npm ~/projects
 
 # Clean projects not modified in 30+ days
 rusty-sweeper clean --age 30 ~/projects
+
+# Include Docker system resources in the cleanup report
+rusty-sweeper clean --types docker ~/projects
 ```
 
 ### Interactive TUI
 
 ```bash
 # Launch TUI at root
-rusty-sweeper tui
+rusty-sweeper
 
 # Start at specific directory
 rusty-sweeper tui /home/user/projects
@@ -80,42 +98,53 @@ rusty-sweeper tui /home/user/projects
 
 ```bash
 # Check once and exit
-rusty-sweeper monitor --once
+rusty-sweeper-monitor --once
 
 # Start as daemon
-rusty-sweeper monitor --daemon
+rusty-sweeper-monitor --daemon
 
 # Custom thresholds (warn at 70%, critical at 85%)
-rusty-sweeper monitor --warn 70 --critical 85
+rusty-sweeper-monitor --warn 70 --critical 85
 
 # Check daemon status
-rusty-sweeper monitor --status
+rusty-sweeper-monitor --status
 
 # Stop daemon
-rusty-sweeper monitor --stop
+rusty-sweeper-monitor --stop
 ```
 
 ## Configuration
 
 Configuration file: `~/.config/rusty-sweeper/config.toml`
 
+The file is currently loaded and validated on startup, but command behavior is not yet fully driven by these values. Treat it as partially implemented.
+
 ```toml
 [scanner]
 parallel_threads = 0  # 0 = auto
 cross_filesystems = false
+use_cache = true
+cache_ttl = 3600
 
 [cleaner]
-project_types = ["cargo", "npm", "go", "python"]
+project_types = ["cargo", "gradle", "npm", "maven"]
+exclude_patterns = ["**/.git", "**/vendor"]
+min_age_days = 7
 max_depth = 10
+parallel_jobs = 4
 
 [monitor]
 interval = 300  # seconds
 warn_threshold = 80
 critical_threshold = 90
+mount_points = []
+notification_backend = "auto"
 
 [tui]
 color_scheme = "auto"
 show_hidden = false
+default_sort = "size"
+large_dir_threshold = 1073741824
 ```
 
 ## TUI Keybindings
@@ -129,6 +158,7 @@ show_hidden = false
 | `d` / `Delete` | Delete selected |
 | `c` | Clean project |
 | `/` | Search |
+| `s` | Cycle sort order |
 | `.` | Toggle hidden files |
 | `r` | Rescan |
 | `?` | Help |
@@ -136,15 +166,22 @@ show_hidden = false
 
 ## Supported Project Types
 
+These are the project types currently detected by `clean` when local artifacts are present:
+
 | Type | Detection | Cleaned |
 |------|-----------|---------|
-| Cargo (Rust) | `Cargo.toml` | `target/` |
+| Cargo (Rust) | `Cargo.toml` | `target/` or `cargo clean` |
 | npm/Node.js | `package.json` | `node_modules/` |
-| Go | `go.mod` | `go build` cache |
-| Python | `setup.py`, `pyproject.toml` | `__pycache__/`, `*.pyc`, `.eggs/`, `*.egg-info/` |
-| CMake | `CMakeLists.txt` | `build/`, `cmake-build-*/` |
-| Gradle | `build.gradle` | `build/`, `.gradle/` |
-| Maven | `pom.xml` | `target/` |
+| Python | `venv/` or `.venv/` | `venv/`, `.venv/`, `__pycache__/` |
+| CMake | `CMakeLists.txt` and `build/` | `build/` |
+| Gradle | `build.gradle`, `build.gradle.kts`, or `gradlew` | `build/`, `.gradle/`, `app/build/` or `./gradlew clean` |
+| Maven | `pom.xml` | `target/` or `mvn clean` |
+| .NET | `*.csproj` or `*.sln` | `bin/`, `obj/` or `dotnet clean` |
+
+Additional status:
+
+- Docker system cleanup is available via the `docker` cleaner and reports reclaimable Docker images and build cache.
+- Go and Bazel detectors exist in the codebase, but they are not currently reported by project scanning because they rely on command-only cleanup without local artifact directories.
 
 ## Systemd Service
 

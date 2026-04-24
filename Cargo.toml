@@ -61,3 +61,7 @@ harness = false
 [[bin]]
 name = "rusty-sweeper"
 path = "src/main.rs"
+
+[[bin]]
+name = "rusty-sweeper-monitor"
+path = "src/bin/rusty-sweeper-monitor.rs"

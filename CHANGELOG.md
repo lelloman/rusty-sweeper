@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Synchronized `README.md`, `SPEC.md`, and the man page with the current implementation status.
+- Documented that `scan --sort mtime` currently falls back to size sorting.
+- Documented that configuration is loaded and validated, but is not yet fully wired into runtime behavior.
+- Documented that Go and Bazel detectors exist in code but are not currently surfaced by project scanning.
+- Corrected the supported cleaner list to include `.NET` and Docker system cleanup.
+
 ## [0.1.0] - 2024-12-07
 
 ### Added
@@ -26,9 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### TUI Features
 - Tree-based navigation with expand/collapse
 - Visual size bars showing relative sizes
-- Multiple sort options (size, name, count)
+- Multiple sort options (size, name, mtime in TUI)
 - File/directory deletion with confirmation
-- Dry-run preview mode
 - Keyboard navigation (vim-style and arrow keys)
 - Delete key support for triggering deletion
 
@@ -36,16 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scan`: Scan directories and report disk usage
 - `tui`: Interactive terminal interface
 - `clean`: Clean build artifacts (Cargo, npm, Python, etc.)
-- `find-large`: Find files larger than specified size
 - `monitor`: Background monitoring daemon with alerts
 - `completions`: Generate shell completions
 
 #### Build Artifact Detection
-- Cargo projects (target/)
-- Node.js projects (node_modules/)
-- Python projects (__pycache__/, .eggs/, *.egg-info/)
-- Go projects (vendor/)
-- Generic patterns (dist/, build/, .cache/)
+- Cargo projects (`target/`)
+- Node.js projects (`node_modules/`)
+- Python environments (`venv/`, `.venv/`, `__pycache__/`)
+- CMake projects (`build/`)
+- Gradle projects (`build/`, `.gradle/`)
+- Maven projects (`target/`)
+- .NET projects (`bin/`, `obj/`)
+- Docker system resources (reclaimable images and build cache)
 
 #### Monitor Service
 - Background daemon for disk usage monitoring
@@ -57,8 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Configuration
 - TOML configuration file support
 - XDG-compliant config location (~/.config/rusty-sweeper/config.toml)
-- Customizable thresholds and patterns
-- Per-command configuration options
+- Configuration parsing and validation
+- Structured sections for monitor, cleaner, scanner, and TUI settings
 
 #### Output Formats
 - Human-readable (default)

@@ -1,14 +1,14 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-fn rusty_sweeper() -> Command {
-    Command::cargo_bin("rusty-sweeper").unwrap()
+fn rusty_sweeper_monitor() -> Command {
+    Command::cargo_bin("rusty-sweeper-monitor").unwrap()
 }
 
 #[test]
 fn test_monitor_help() {
-    rusty_sweeper()
-        .args(["monitor", "--help"])
+    rusty_sweeper_monitor()
+        .arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains("--daemon"))
@@ -25,35 +25,32 @@ fn test_monitor_help() {
 #[test]
 fn test_monitor_once() {
     // Run monitor once with stderr backend to avoid D-Bus issues in CI
-    rusty_sweeper()
-        .args(["monitor", "--once", "--notify", "stderr"])
+    rusty_sweeper_monitor()
+        .args(["--once", "--notify", "stderr"])
         .assert()
         .success();
 }
 
 #[test]
 fn test_monitor_once_with_custom_mount() {
-    rusty_sweeper()
-        .args(["monitor", "--once", "--notify", "stderr", "--mount", "/"])
+    rusty_sweeper_monitor()
+        .args(["--once", "--notify", "stderr", "--mount", "/"])
         .assert()
         .success();
 }
 
 #[test]
 fn test_monitor_once_multiple_mounts() {
-    rusty_sweeper()
-        .args([
-            "monitor", "--once", "--notify", "stderr", "--mount", "/", "--mount", "/home",
-        ])
+    rusty_sweeper_monitor()
+        .args(["--once", "--notify", "stderr", "--mount", "/", "--mount", "/home"])
         .assert()
         .success();
 }
 
 #[test]
 fn test_monitor_invalid_thresholds_warn_gt_critical() {
-    rusty_sweeper()
+    rusty_sweeper_monitor()
         .args([
-            "monitor",
             "--once",
             "--notify",
             "stderr",
@@ -69,9 +66,8 @@ fn test_monitor_invalid_thresholds_warn_gt_critical() {
 
 #[test]
 fn test_monitor_invalid_thresholds_warn_eq_critical() {
-    rusty_sweeper()
+    rusty_sweeper_monitor()
         .args([
-            "monitor",
             "--once",
             "--notify",
             "stderr",
@@ -87,9 +83,8 @@ fn test_monitor_invalid_thresholds_warn_eq_critical() {
 
 #[test]
 fn test_monitor_invalid_thresholds_over_100() {
-    rusty_sweeper()
+    rusty_sweeper_monitor()
         .args([
-            "monitor",
             "--once",
             "--notify",
             "stderr",
@@ -105,8 +100,8 @@ fn test_monitor_invalid_thresholds_over_100() {
 
 #[test]
 fn test_monitor_status_not_running() {
-    rusty_sweeper()
-        .args(["monitor", "--status"])
+    rusty_sweeper_monitor()
+        .arg("--status")
         .assert()
         .success()
         .stdout(predicate::str::contains("not running"));
@@ -114,8 +109,8 @@ fn test_monitor_status_not_running() {
 
 #[test]
 fn test_monitor_stop_not_running() {
-    rusty_sweeper()
-        .args(["monitor", "--stop"])
+    rusty_sweeper_monitor()
+        .arg("--stop")
         .assert()
         .success()
         .stdout(predicate::str::contains("No monitor daemon running"));
@@ -124,9 +119,8 @@ fn test_monitor_stop_not_running() {
 #[test]
 fn test_monitor_stderr_backend() {
     // Use a very low threshold to ensure we get output
-    rusty_sweeper()
+    rusty_sweeper_monitor()
         .args([
-            "monitor",
             "--once",
             "--notify",
             "stderr",
@@ -141,8 +135,8 @@ fn test_monitor_stderr_backend() {
 
 #[test]
 fn test_monitor_unknown_backend() {
-    rusty_sweeper()
-        .args(["monitor", "--once", "--notify", "invalid-backend"])
+    rusty_sweeper_monitor()
+        .args(["--once", "--notify", "invalid-backend"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown notification backend"));
@@ -150,9 +144,8 @@ fn test_monitor_unknown_backend() {
 
 #[test]
 fn test_monitor_custom_interval() {
-    rusty_sweeper()
+    rusty_sweeper_monitor()
         .args([
-            "monitor",
             "--once",
             "--notify",
             "stderr",

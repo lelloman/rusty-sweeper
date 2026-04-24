@@ -21,14 +21,11 @@ pub struct Cli {
     pub quiet: bool,
 
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Start disk usage monitoring
-    Monitor(MonitorArgs),
-
     /// Scan for projects and clean build artifacts
     Clean(CleanArgs),
 
@@ -40,6 +37,28 @@ pub enum Command {
 
     /// Generate shell completions
     Completions(CompletionsArgs),
+}
+
+/// Dedicated CLI for the monitor binary.
+#[derive(Parser, Debug)]
+#[command(name = "rusty-sweeper-monitor")]
+#[command(author, version, about = "Disk usage monitor daemon and alerting service")]
+#[command(propagate_version = true)]
+pub struct MonitorCli {
+    /// Path to configuration file
+    #[arg(short, long, global = true, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Increase verbosity (-v, -vv, -vvv)
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
+    /// Suppress non-essential output
+    #[arg(short, long, global = true)]
+    pub quiet: bool,
+
+    #[command(flatten)]
+    pub args: MonitorArgs,
 }
 
 #[derive(Args, Debug)]
@@ -192,7 +211,7 @@ mod tests {
     fn parse_scan_command() {
         let cli = Cli::parse_from(["rusty-sweeper", "scan", "/home"]);
         match cli.command {
-            Command::Scan(args) => {
+            Some(Command::Scan(args)) => {
                 assert_eq!(args.path, PathBuf::from("/home"));
             }
             _ => panic!("Expected Scan command"),
@@ -212,7 +231,7 @@ mod tests {
             "/projects",
         ]);
         match cli.command {
-            Command::Clean(args) => {
+            Some(Command::Clean(args)) => {
                 assert!(args.dry_run);
                 assert_eq!(args.max_depth, 5);
                 assert_eq!(
@@ -228,5 +247,18 @@ mod tests {
     fn global_verbose_flag() {
         let cli = Cli::parse_from(["rusty-sweeper", "-vvv", "scan"]);
         assert_eq!(cli.verbose, 3);
+    }
+
+    #[test]
+    fn no_subcommand_is_allowed() {
+        let cli = Cli::parse_from(["rusty-sweeper"]);
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn parse_monitor_cli() {
+        let cli = MonitorCli::parse_from(["rusty-sweeper-monitor", "--once", "--notify", "stderr"]);
+        assert!(cli.args.once);
+        assert_eq!(cli.args.notify, "stderr");
     }
 }

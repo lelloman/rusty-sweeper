@@ -24,14 +24,6 @@ fn shows_version() {
 }
 
 #[test]
-fn requires_subcommand() {
-    rusty_sweeper()
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Usage:"));
-}
-
-#[test]
 fn scan_subcommand_help() {
     rusty_sweeper()
         .args(["scan", "--help"])
@@ -50,21 +42,22 @@ fn clean_subcommand_help() {
 }
 
 #[test]
-fn monitor_subcommand_help() {
-    rusty_sweeper()
-        .args(["monitor", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("monitoring"));
-}
-
-#[test]
 fn tui_subcommand_help() {
     rusty_sweeper()
         .args(["tui", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("interactive"));
+}
+
+#[test]
+fn help_does_not_list_monitor_subcommand() {
+    rusty_sweeper()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tui"))
+        .stdout(predicate::str::contains("monitor").not());
 }
 
 #[test]
@@ -116,15 +109,6 @@ fn clean_size_only_shows_projects() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Scanning for projects"));
-}
-
-#[test]
-fn monitor_runs_once() {
-    // Monitor is now implemented; verify it runs successfully in --once mode
-    rusty_sweeper()
-        .args(["monitor", "--once", "--notify", "stderr"])
-        .assert()
-        .success();
 }
 
 // Note: TUI command is implemented but can't be tested in CI

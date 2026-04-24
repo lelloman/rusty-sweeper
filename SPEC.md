@@ -2,17 +2,20 @@
 
 A Linux disk usage management utility written in Rust.
 
+This document reflects the current implementation status of the project, including shipped features and known gaps.
+
 ---
 
 # Part 1: Project Specification
 
 ## 1.1 Overview
 
-Rusty Sweeper prevents disk space exhaustion through three core capabilities:
+Rusty Sweeper prevents disk space exhaustion through four core capabilities:
 
 1. **Monitor** - Proactive disk usage alerts via desktop notifications
 2. **Clean** - Automated discovery and cleanup of build artifacts
 3. **TUI** - Interactive filesystem explorer for disk usage analysis
+4. **Scan** - Non-interactive directory analysis with tree and JSON output
 
 ### Goals
 
@@ -28,6 +31,13 @@ Rusty Sweeper prevents disk space exhaustion through three core capabilities:
 - Real-time inotify-based monitoring
 - Windows/macOS support
 
+### Current Implementation Notes
+
+- The main CLI surface is implemented: `scan`, `clean`, `monitor`, `tui`, and `completions`.
+- The configuration file is loaded and validated, but most command behavior is still controlled directly by CLI flags.
+- `scan --sort mtime` is accepted by the CLI, but currently falls back to size sorting.
+- Go and Bazel cleanup support exists as detector definitions, but command-only cleanup for those project types is not currently surfaced by project scanning.
+
 ---
 
 ## 1.2 Architecture
@@ -36,7 +46,7 @@ Rusty Sweeper prevents disk space exhaustion through three core capabilities:
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLI (clap)                              │
 │    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│    │ monitor  │  │  clean   │  │   scan   │  │   tui    │      │
+│    │ monitor* │  │  clean   │  │   scan   │  │   tui    │      │
 │    └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
 ├─────────┼─────────────┼────────────┼─────────────┼──────────────┤
 │         │             │            │             │              │
@@ -60,10 +70,14 @@ Rusty Sweeper prevents disk space exhaustion through three core capabilities:
 rusty-sweeper <COMMAND>
 
 Commands:
-  monitor   Start disk usage monitoring (daemon or one-shot)
   clean     Discover and clean build artifacts
   scan      Analyze disk usage of a directory
   tui       Launch interactive disk explorer
+  completions  Generate shell completions
+
+Default behavior:
+  rusty-sweeper            Launch the TUI
+  rusty-sweeper-monitor    Start disk usage monitoring (daemon or one-shot)
 
 Global Options:
   -c, --config <PATH>   Config file path
@@ -82,15 +96,18 @@ Periodically checks disk usage and sends desktop notifications when thresholds a
 ### Command
 
 ```
-rusty-sweeper monitor [OPTIONS]
+rusty-sweeper-monitor [OPTIONS]
 
 Options:
   -d, --daemon              Run as background daemon
   -i, --interval <SECS>     Check interval [default: 300]
   -w, --warn <PERCENT>      Warning threshold [default: 80]
-  -c, --critical <PERCENT>  Critical threshold [default: 90]
-  -m, --mount <PATH>        Mount point to monitor [default: /]
+  -C, --critical <PERCENT>  Critical threshold [default: 90]
+  -m, --mount <PATH>        Mount point to monitor (repeatable)
+      --notify <BACKEND>    Notification backend: auto|dbus|notify-send|stderr
       --once                Check once and exit
+      --stop                Stop a running daemon
+      --status              Show daemon status
 ```
 
 ### Notification Backends
@@ -117,6 +134,11 @@ Options:
 - Log file: `$XDG_STATE_HOME/rusty-sweeper/monitor.log`
 - Signal handling: SIGHUP (reload config), SIGTERM (shutdown)
 
+Current status:
+
+- Daemon mode, PID/log handling, stop/status commands, and notifier backend selection are implemented.
+- SIGHUP sets a reload flag, but runtime config reload is not currently applied to the running monitor service.
+
 ### Systemd Integration
 
 ```ini
@@ -126,7 +148,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/rusty-sweeper monitor
+ExecStart=/usr/bin/rusty-sweeper-monitor
 Restart=on-failure
 
 [Install]
@@ -163,14 +185,21 @@ Options:
 | Type | Detection Files | Clean Command | Artifacts |
 |------|-----------------|---------------|-----------|
 | Cargo | `Cargo.toml` | `cargo clean` | `target/` |
-| Gradle | `gradlew`, `build.gradle` | `./gradlew clean` | `build/`, `.gradle/` |
+| Gradle | `gradlew`, `build.gradle`, `build.gradle.kts` | `./gradlew clean` | `build/`, `.gradle/`, `app/build/` |
 | Maven | `pom.xml` | `mvn clean` | `target/` |
-| npm | `package.json` | `rm -rf node_modules` | `node_modules/` |
-| Go | `go.mod` | `go clean -cache` | module cache |
-| CMake | `CMakeLists.txt` + `build/` | `rm -rf build/` | `build/` |
-| Python | `venv/`, `.venv/` | `rm -rf venv/` | `venv/`, `__pycache__/` |
-| Bazel | `WORKSPACE` | `bazel clean` | `bazel-*` |
+| npm | `package.json` | direct deletion | `node_modules/` |
+| Go | `go.mod` | `go clean -cache` | global cache |
+| CMake | `CMakeLists.txt` and `build/` | direct deletion | `build/` |
+| Python | `venv/`, `.venv/` | direct deletion | `venv/`, `.venv/`, `__pycache__/` |
+| Bazel | `WORKSPACE`, `WORKSPACE.bazel` | `bazel clean --expunge` | command-only |
 | .NET | `*.csproj`, `*.sln` | `dotnet clean` | `bin/`, `obj/` |
+| Docker | Docker daemon available | `docker builder prune` / `docker image prune -a` | build cache, reclaimable images |
+
+Current behavior:
+
+- `clean` only reports project types that have local artifact directories present.
+- Because of that, Go and Bazel are currently not surfaced by project scanning despite detector definitions.
+- Docker is implemented as a system cleaner, not as a project detector.
 
 ### Detection Algorithm
 
@@ -202,16 +231,21 @@ Found 5 projects with cleanable artifacts:
 
   Total: 5.1 GB
 
-Proceed with cleanup? [y/N/s(elect)]
+Proceed with cleanup? [y/N]
 ```
 
 ### Safety Measures
 
-1. Only delete known artifact directories (never source files)
-2. Prefer native clean commands over `rm -rf`
-3. Warn on uncommitted git changes (optional)
-4. Age verification with `--age` flag
-5. Dry-run mode for preview
+1. Only delete known artifact directories for detector-based cleanup
+2. Prefer native clean commands when available for a detector
+3. Age verification with `--age` flag
+4. Dry-run mode for preview
+5. Confirmation prompt unless `--force` is used
+
+Not currently implemented:
+
+- Git dirty-tree warnings
+- Interactive per-item selection from the CLI confirmation prompt
 
 ---
 
@@ -255,7 +289,13 @@ struct DirEntry {
 
 - Parallel traversal using `rayon`
 - Work-stealing for balanced load
-- Optional caching to SQLite (`$XDG_CACHE_HOME/rusty-sweeper/cache.db`)
+
+Current status:
+
+- Parallel scanning is implemented.
+- Hidden file filtering, depth limiting, JSON output, and size/name sorting are implemented.
+- `mtime` is accepted as a sort flag but currently falls back to size sort.
+- Persistent scan caching is not implemented.
 
 ---
 
@@ -266,6 +306,7 @@ Interactive terminal UI for exploring and managing disk usage.
 ### Command
 
 ```
+rusty-sweeper
 rusty-sweeper tui [OPTIONS] [PATH]
 
 Arguments:
@@ -306,7 +347,8 @@ Options:
 | / | Search/filter |
 | s | Cycle sort order |
 | r | Refresh/rescan |
-| Space | Mark for batch operation |
+| . | Toggle hidden files |
+| Space | Toggle expand/collapse |
 | ? | Help |
 | q, Esc | Quit |
 
@@ -316,9 +358,15 @@ Options:
 |--------|---------|
 | ▼ | Expanded directory |
 | ► | Collapsed directory |
-| [P] | Detected project (cleanable) |
-| [!] | Large directory (>1GB) |
+| `[Rust]`, `[npm]`, etc. | Detected project type |
 | [X] | Permission denied |
+
+Current status:
+
+- Tree browsing, search, deletion, project cleaning, and progressive background scanning are implemented.
+- The TUI also displays Docker system resources when available.
+- Batch marking/queueing is not implemented.
+- `--one-file-system` and `--no-color` exist on the CLI, but current TUI startup does not apply those flags to runtime behavior.
 
 ---
 
@@ -366,6 +414,12 @@ clean_command = "cargo clean"
 artifact_dirs = ["target"]
 ```
 
+Current status:
+
+- The config file is loaded from the documented locations and validated.
+- The structured config fields above exist in code.
+- Most command behavior is not yet driven from config values, and custom project type definitions are not implemented.
+
 ---
 
 ## 1.9 Error Handling
@@ -376,19 +430,17 @@ artifact_dirs = ["target"]
 |------|---------|
 | 0 | Success |
 | 1 | General error |
-| 2 | Configuration error |
-| 3 | Permission denied |
-| 4 | Interrupted (SIGINT) |
-| 5 | Partial failure |
+| 2 | Invalid cleaner type selection |
+| 5 | Partial failure during cleanup |
 
 ### Error Strategy
 
 | Error Type | Handling |
 |------------|----------|
-| Permission denied | Log, skip, continue |
-| Disk I/O error | Retry with backoff, then fail gracefully |
-| Invalid config | Use defaults, warn user |
-| Clean command fails | Log, report, continue to next project |
+| Permission denied | Log or render error entry, then continue where possible |
+| Disk I/O error | Return an error or keep partial scan state, depending on command |
+| Invalid explicit config path | Fail startup |
+| Clean command fails | Warn and fall back to direct deletion when local artifacts exist |
 
 ---
 
@@ -400,7 +452,6 @@ artifact_dirs = ["target"]
 |-------|---------|
 | `clap` | CLI parsing |
 | `ratatui` + `crossterm` | TUI |
-| `tokio` | Async runtime |
 | `rayon` | Parallelism |
 | `walkdir` | Directory traversal |
 | `notify-rust` | Desktop notifications |
@@ -421,10 +472,10 @@ artifact_dirs = ["target"]
 ## 1.11 Security
 
 1. Run as regular user, respect permissions
-2. No arbitrary command execution (predefined clean commands only)
-3. Path traversal protection (no symlink escape)
-4. Audit logging for delete operations
-5. Dry-run default in CI environments
+2. No arbitrary command execution beyond predefined cleaner commands
+3. Scanner avoids following symlinks by default
+4. Destructive delete/clean actions require confirmation unless explicitly forced
+5. No trash or recovery layer is currently implemented
 
 ---
 
@@ -625,8 +676,8 @@ The project is complete when:
 
 1. `rusty-sweeper scan ~` shows disk usage tree
 2. `rusty-sweeper clean ~/projects` finds and cleans build artifacts
-3. `rusty-sweeper tui` provides interactive exploration
-4. `rusty-sweeper monitor --daemon` runs in background and sends notifications
+3. `rusty-sweeper` provides interactive exploration by default
+4. `rusty-sweeper-monitor --daemon` runs in background and sends notifications
 5. All commands respect configuration file
 6. Clean exits on Ctrl+C
 7. Handles permission errors gracefully
