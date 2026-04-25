@@ -6,22 +6,17 @@ A fast, interactive disk usage analyzer and cleaner for Linux.
 
 Rusty Sweeper is implemented and test-covered across its main command surface:
 
-- `scan` is implemented and supports tree output, JSON output, hidden files, depth limiting, and size/name sorting.
-- `clean` is implemented for local build artifact cleanup and Docker system resources.
-- `rusty-sweeper` launches the TUI by default, including navigation, search, delete, clean, and background scanning.
+- `rusty-sweeper` is the interactive product and launches the TUI directly.
 - `rusty-sweeper-monitor` is a dedicated monitor binary with one-shot checks, daemon mode, PID/log management, and multiple notification backends.
 
 Current limitations:
 
-- `scan --sort mtime` is accepted by the CLI, but currently falls back to size sorting.
 - The configuration file is loaded and validated, but most command behavior is still driven directly by CLI flags rather than config values.
-- Go and Bazel detectors exist in the codebase, but command-only cleanup for those project types is not currently surfaced by project scanning.
+- Cleanup and scan engines still exist in the codebase, but they are no longer exposed as standalone CLI subcommands.
 
 ## Features
 
-- **Disk Scanner**: Analyze disk usage with parallel traversal
-- **Project Cleaner**: Detect and clean build artifacts (Cargo, npm, Python, CMake, Gradle, Maven, .NET) plus Docker system resources
-- **Interactive TUI**: Navigate and clean directly from the terminal
+- **Interactive TUI**: Browse disk usage and clean directly from the terminal
 - **Monitor Service**: Background daemon with desktop notifications when disk is full
 
 ## Installation
@@ -34,55 +29,7 @@ cd rusty-sweeper
 cargo install --path .
 ```
 
-### Shell Completions
-
-```bash
-# Bash
-rusty-sweeper completions bash > ~/.local/share/bash-completion/completions/rusty-sweeper
-
-# Zsh
-rusty-sweeper completions zsh > ~/.local/share/zsh/site-functions/_rusty-sweeper
-
-# Fish
-rusty-sweeper completions fish > ~/.config/fish/completions/rusty-sweeper.fish
-```
-
 ## Usage
-
-### Scan Directory
-
-```bash
-# Analyze current directory
-rusty-sweeper scan
-
-# Analyze specific path with depth limit
-rusty-sweeper scan /home -d 5
-
-# Output as JSON
-rusty-sweeper scan --json /var
-```
-
-### Clean Build Artifacts
-
-```bash
-# Find cleanable projects and show sizes
-rusty-sweeper clean --size-only ~/projects
-
-# Clean with confirmation
-rusty-sweeper clean ~/projects
-
-# Dry run (show what would be cleaned)
-rusty-sweeper clean -n ~/projects
-
-# Clean specific project types
-rusty-sweeper clean --types cargo,npm ~/projects
-
-# Clean projects not modified in 30+ days
-rusty-sweeper clean --age 30 ~/projects
-
-# Include Docker system resources in the cleanup report
-rusty-sweeper clean --types docker ~/projects
-```
 
 ### Interactive TUI
 
@@ -90,7 +37,7 @@ rusty-sweeper clean --types docker ~/projects
 # Launch TUI at root
 rusty-sweeper
 
-# `rusty-sweeper` is now the only interactive entrypoint
+# `rusty-sweeper` is the only user-facing mode of the main binary
 ```
 
 ### Monitor Disk Usage
@@ -116,7 +63,7 @@ rusty-sweeper-monitor --stop
 
 Configuration file: `~/.config/rusty-sweeper/config.toml`
 
-The file is currently loaded and validated on startup, but command behavior is not yet fully driven by these values. Treat it as partially implemented.
+The file is currently loaded and validated on startup, but behavior is not yet fully driven by these values. Treat it as partially implemented.
 
 ```toml
 [scanner]
@@ -163,24 +110,9 @@ large_dir_threshold = 1073741824
 | `?` | Help |
 | `q` / `Esc` | Quit |
 
-## Supported Project Types
+## Cleanup Support
 
-These are the project types currently detected by `clean` when local artifacts are present:
-
-| Type | Detection | Cleaned |
-|------|-----------|---------|
-| Cargo (Rust) | `Cargo.toml` | `target/` or `cargo clean` |
-| npm/Node.js | `package.json` | `node_modules/` |
-| Python | `venv/` or `.venv/` | `venv/`, `.venv/`, `__pycache__/` |
-| CMake | `CMakeLists.txt` and `build/` | `build/` |
-| Gradle | `build.gradle`, `build.gradle.kts`, or `gradlew` | `build/`, `.gradle/`, `app/build/` or `./gradlew clean` |
-| Maven | `pom.xml` | `target/` or `mvn clean` |
-| .NET | `*.csproj` or `*.sln` | `bin/`, `obj/` or `dotnet clean` |
-
-Additional status:
-
-- Docker system cleanup is available via the `docker` cleaner and reports reclaimable Docker images and build cache.
-- Go and Bazel detectors exist in the codebase, but they are not currently reported by project scanning because they rely on command-only cleanup without local artifact directories.
+The TUI can identify and clean common local build artifacts for Cargo, npm, Python, CMake, Gradle, Maven, and .NET projects. Docker system resources are also surfaced when available.
 
 ## Systemd Service
 

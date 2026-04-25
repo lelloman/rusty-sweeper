@@ -10,12 +10,10 @@ This document reflects the current implementation status of the project, includi
 
 ## 1.1 Overview
 
-Rusty Sweeper prevents disk space exhaustion through four core capabilities:
+Rusty Sweeper currently exposes two user-facing capabilities:
 
 1. **Monitor** - Proactive disk usage alerts via desktop notifications
-2. **Clean** - Automated discovery and cleanup of build artifacts
-3. **TUI** - Interactive filesystem explorer for disk usage analysis
-4. **Scan** - Non-interactive directory analysis with tree and JSON output
+2. **TUI** - Interactive filesystem explorer for disk usage analysis and cleanup
 
 ### Goals
 
@@ -33,10 +31,10 @@ Rusty Sweeper prevents disk space exhaustion through four core capabilities:
 
 ### Current Implementation Notes
 
-- The main CLI surface is implemented: `scan`, `clean`, `monitor`, `tui`, and `completions`.
+- `rusty-sweeper` launches the TUI directly.
+- `rusty-sweeper-monitor` is the dedicated monitor binary.
 - The configuration file is loaded and validated, but most command behavior is still controlled directly by CLI flags.
-- `scan --sort mtime` is accepted by the CLI, but currently falls back to size sorting.
-- Go and Bazel cleanup support exists as detector definitions, but command-only cleanup for those project types is not currently surfaced by project scanning.
+- Scan and cleanup engines still exist in the codebase, but are no longer exposed as standalone subcommands on the main binary.
 
 ---
 
@@ -69,12 +67,7 @@ Rusty Sweeper prevents disk space exhaustion through four core capabilities:
 ```
 rusty-sweeper <COMMAND>
 
-Commands:
-  clean     Discover and clean build artifacts
-  scan      Analyze disk usage of a directory
-  completions  Generate shell completions
-
-Default behavior:
+Programs:
   rusty-sweeper            Launch the TUI
   rusty-sweeper-monitor    Start disk usage monitoring (daemon or one-shot)
 
@@ -158,26 +151,7 @@ WantedBy=default.target
 
 ## 1.5 Cleaner Engine
 
-Discovers coding projects and executes appropriate clean commands.
-
-### Command
-
-```
-rusty-sweeper clean [OPTIONS] [PATH]
-
-Arguments:
-  [PATH]  Root directory to scan [default: .]
-
-Options:
-  -n, --dry-run           Show what would be cleaned
-  -d, --max-depth <N>     Maximum recursion depth [default: 10]
-  -t, --types <TYPES>     Project types to clean (comma-separated)
-  -e, --exclude <PATHS>   Exclude patterns (glob)
-  -a, --age <DAYS>        Only clean if not modified in N days
-  -f, --force             Skip confirmation prompts
-  -j, --jobs <N>          Parallel clean jobs [default: 4]
-      --size-only         Report sizes without cleaning
-```
+Discovers coding projects and executes appropriate clean operations from within the TUI.
 
 ### Supported Project Types
 
@@ -196,8 +170,8 @@ Options:
 
 Current behavior:
 
-- `clean` only reports project types that have local artifact directories present.
-- Because of that, Go and Bazel are currently not surfaced by project scanning despite detector definitions.
+- The TUI only offers cleanup when local artifact directories are present.
+- Because of that, Go and Bazel are currently not surfaced despite detector definitions.
 - Docker is implemented as a system cleaner, not as a project detector.
 
 ### Detection Algorithm
@@ -244,31 +218,13 @@ Proceed with cleanup? [y/N]
 Not currently implemented:
 
 - Git dirty-tree warnings
-- Interactive per-item selection from the CLI confirmation prompt
+- A standalone non-interactive cleanup CLI
 
 ---
 
 ## 1.6 Disk Scanner
 
-Parallel directory traversal with size calculation.
-
-### Command
-
-```
-rusty-sweeper scan [OPTIONS] [PATH]
-
-Arguments:
-  [PATH]  Directory to analyze [default: .]
-
-Options:
-  -d, --max-depth <N>     Display depth [default: 3]
-  -n, --top <N>           Show top N entries [default: 20]
-  -a, --all               Include hidden files
-  -x, --one-file-system   Don't cross mount boundaries
-  -j, --jobs <N>          Parallel threads [default: num_cpus]
-      --json              JSON output
-      --sort <BY>         Sort: size|name|mtime [default: size]
-```
+Parallel directory traversal with size calculation. This powers the TUI and remains available as an internal engine.
 
 ### Data Model
 
@@ -292,8 +248,8 @@ struct DirEntry {
 Current status:
 
 - Parallel scanning is implemented.
-- Hidden file filtering, depth limiting, JSON output, and size/name sorting are implemented.
-- `mtime` is accepted as a sort flag but currently falls back to size sort.
+- Hidden file filtering and depth limiting are implemented in the engine.
+- JSON output and standalone scan formatting still exist in code, but are no longer exposed on the main CLI.
 - Persistent scan caching is not implemented.
 
 ---
@@ -508,7 +464,7 @@ rusty-sweeper/
 1. Directory traversal with `walkdir`
 2. Parallel size calculation with `rayon`
 3. `DirEntry` data structure with tree building
-4. `scan` subcommand implementation
+4. Scanner integration for the TUI and internal formatting paths
 5. JSON output option
 6. Unit tests for size calculations
 
@@ -531,7 +487,7 @@ pub fn format_tree(entry: &DirEntry, depth: usize) -> String;
 2. Built-in detectors for all 9 project types
 3. Artifact size calculation
 4. Clean command execution
-5. `clean` subcommand with dry-run, confirmation, parallel execution
+5. Cleaner integration for the TUI with confirmation and parallel execution
 6. Integration tests with temp directories
 
 ### Key Types
@@ -637,7 +593,7 @@ pub struct DiskStatus {
 | 3 | Cleaner | (uses scanner) |
 | 4 | TUI | ratatui, crossterm |
 | 5 | Monitor | notify-rust, nix (for daemon) |
-| 6 | Polish | clap_complete, clap_mangen |
+| 6 | Polish | clap_mangen |
 
 ---
 
@@ -665,10 +621,8 @@ cargo test --test integration
 
 The project is complete when:
 
-1. `rusty-sweeper scan ~` shows disk usage tree
-2. `rusty-sweeper clean ~/projects` finds and cleans build artifacts
-3. `rusty-sweeper` provides interactive exploration by default
-4. `rusty-sweeper-monitor --daemon` runs in background and sends notifications
+1. `rusty-sweeper` provides interactive exploration
+2. `rusty-sweeper-monitor --daemon` runs in background and sends notifications
 5. All commands respect configuration file
 6. Clean exits on Ctrl+C
 7. Handles permission errors gracefully

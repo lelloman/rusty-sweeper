@@ -1,5 +1,4 @@
-use clap::{Args, Parser, Subcommand};
-use clap_complete::Shell;
+use clap::{Args, Parser};
 use std::path::PathBuf;
 
 /// Rusty Sweeper - A Linux disk usage management utility
@@ -20,20 +19,6 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub quiet: bool,
 
-    #[command(subcommand)]
-    pub command: Option<Command>,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Command {
-    /// Scan for projects and clean build artifacts
-    Clean(CleanArgs),
-
-    /// Analyze disk usage of a directory
-    Scan(ScanArgs),
-
-    /// Generate shell completions
-    Completions(CompletionsArgs),
 }
 
 /// Dedicated CLI for the monitor binary.
@@ -56,13 +41,6 @@ pub struct MonitorCli {
 
     #[command(flatten)]
     pub args: MonitorArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct CompletionsArgs {
-    /// Shell to generate completions for
-    #[arg(value_enum)]
-    pub shell: Shell,
 }
 
 #[derive(Args, Debug)]
@@ -190,51 +168,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_scan_command() {
-        let cli = Cli::parse_from(["rusty-sweeper", "scan", "/home"]);
-        match cli.command {
-            Some(Command::Scan(args)) => {
-                assert_eq!(args.path, PathBuf::from("/home"));
-            }
-            _ => panic!("Expected Scan command"),
-        }
+    fn parse_main_cli_without_subcommands() {
+        let cli = Cli::parse_from(["rusty-sweeper"]);
+        assert!(cli.config.is_none());
+        assert!(!cli.quiet);
     }
 
     #[test]
-    fn parse_clean_with_options() {
-        let cli = Cli::parse_from([
-            "rusty-sweeper",
-            "clean",
-            "--dry-run",
-            "--types",
-            "cargo,npm",
-            "--max-depth",
-            "5",
-            "/projects",
-        ]);
-        match cli.command {
-            Some(Command::Clean(args)) => {
-                assert!(args.dry_run);
-                assert_eq!(args.max_depth, 5);
-                assert_eq!(
-                    args.types,
-                    Some(vec!["cargo".to_string(), "npm".to_string()])
-                );
-            }
-            _ => panic!("Expected Clean command"),
-        }
+    fn parse_main_cli_with_globals() {
+        let cli = Cli::parse_from(["rusty-sweeper", "--quiet", "--config", "/tmp/test.toml"]);
+        assert!(cli.quiet);
+        assert_eq!(cli.config, Some(PathBuf::from("/tmp/test.toml")));
     }
 
     #[test]
     fn global_verbose_flag() {
-        let cli = Cli::parse_from(["rusty-sweeper", "-vvv", "scan"]);
+        let cli = Cli::parse_from(["rusty-sweeper", "-vvv"]);
         assert_eq!(cli.verbose, 3);
-    }
-
-    #[test]
-    fn no_subcommand_is_allowed() {
-        let cli = Cli::parse_from(["rusty-sweeper"]);
-        assert!(cli.command.is_none());
     }
 
     #[test]
