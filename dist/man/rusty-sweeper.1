@@ -99,21 +99,9 @@ Parallel clean jobs (default: 4)
 .TP
 .B \-\-size-only
 Only report sizes, don't clean
-.SS tui
-Launch interactive TUI.
-.PP
 .B rusty-sweeper
 .PP
 Launch the TUI with default settings.
-.PP
-.B rusty-sweeper tui
-[\fIOPTIONS\fR] [\fIPATH\fR]
-.TP
-.BR \-x ", " \-\-one-file-system
-Don't cross filesystem boundaries
-.TP
-.B \-\-no-color
-Disable colors
 .SS completions
 Generate shell completions.
 .PP
@@ -230,9 +218,6 @@ Clean all Cargo and npm projects older than 30 days:
 .TP
 Start the TUI:
 .B rusty-sweeper
-.TP
-Start interactive TUI at home directory:
-.B rusty-sweeper tui ~
 .TP
 Start monitor daemon with custom thresholds:
 .B rusty-sweeper-monitor -d -w 70 -C 85

@@ -72,7 +72,6 @@ rusty-sweeper <COMMAND>
 Commands:
   clean     Discover and clean build artifacts
   scan      Analyze disk usage of a directory
-  tui       Launch interactive disk explorer
   completions  Generate shell completions
 
 Default behavior:
@@ -307,14 +306,6 @@ Interactive terminal UI for exploring and managing disk usage.
 
 ```
 rusty-sweeper
-rusty-sweeper tui [OPTIONS] [PATH]
-
-Arguments:
-  [PATH]  Starting directory [default: /]
-
-Options:
-  -x, --one-file-system   Don't cross mount boundaries
-      --no-color          Disable colors
 ```
 
 ### Layout
@@ -366,7 +357,7 @@ Current status:
 - Tree browsing, search, deletion, project cleaning, and progressive background scanning are implemented.
 - The TUI also displays Docker system resources when available.
 - Batch marking/queueing is not implemented.
-- `--one-file-system` and `--no-color` exist on the CLI, but current TUI startup does not apply those flags to runtime behavior.
+- The interactive mode currently starts from `/` when launched without further arguments.
 
 ---
 

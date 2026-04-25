@@ -57,7 +57,7 @@ impl Notifier for I3NagbarNotifier {
             .arg(&message)
             .arg("-b")
             .arg("Open TUI")
-            .arg("rusty-sweeper tui")
+            .arg("rusty-sweeper")
             .arg("-b")
             .arg("Dismiss")
             .arg("true")

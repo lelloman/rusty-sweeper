@@ -90,8 +90,7 @@ rusty-sweeper clean --types docker ~/projects
 # Launch TUI at root
 rusty-sweeper
 
-# Start at specific directory
-rusty-sweeper tui /home/user/projects
+# `rusty-sweeper` is now the only interactive entrypoint
 ```
 
 ### Monitor Disk Usage

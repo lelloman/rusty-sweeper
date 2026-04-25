@@ -42,22 +42,22 @@ fn clean_subcommand_help() {
 }
 
 #[test]
-fn tui_subcommand_help() {
-    rusty_sweeper()
-        .args(["tui", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("interactive"));
-}
-
-#[test]
 fn help_does_not_list_monitor_subcommand() {
     rusty_sweeper()
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("tui"))
+        .stdout(predicate::str::contains("scan"))
         .stdout(predicate::str::contains("monitor").not());
+}
+
+#[test]
+fn help_does_not_list_tui_subcommand() {
+    rusty_sweeper()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tui").not());
 }
 
 #[test]
@@ -111,6 +111,5 @@ fn clean_size_only_shows_projects() {
         .stdout(predicate::str::contains("Scanning for projects"));
 }
 
-// Note: TUI command is implemented but can't be tested in CI
-// because it requires a real terminal. The tui_subcommand_help test
-// above verifies the command is recognized.
+// Note: the default no-subcommand path launches the TUI and can't be
+// exercised here because it requires a real terminal.

@@ -29,11 +29,6 @@ fn main() -> Result<()> {
             tracing::info!(?args, "Starting scan");
             commands::scan::run(args)?;
         }
-        Some(Command::Tui(args)) => {
-            tracing::info!(?args, "Starting TUI");
-            let root = args.path.canonicalize()?;
-            rusty_sweeper::tui::run(root)?;
-        }
         Some(Command::Completions(args)) => {
             let mut cmd = Cli::command();
             generate(args.shell, &mut cmd, "rusty-sweeper", &mut io::stdout());

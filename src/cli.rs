@@ -32,9 +32,6 @@ pub enum Command {
     /// Analyze disk usage of a directory
     Scan(ScanArgs),
 
-    /// Launch interactive TUI
-    Tui(TuiArgs),
-
     /// Generate shell completions
     Completions(CompletionsArgs),
 }
@@ -179,21 +176,6 @@ pub struct ScanArgs {
     /// Sort by: size, name, mtime
     #[arg(long, default_value = "size", value_name = "BY")]
     pub sort: String,
-}
-
-#[derive(Args, Debug)]
-pub struct TuiArgs {
-    /// Starting directory
-    #[arg(default_value = "/")]
-    pub path: PathBuf,
-
-    /// Don't cross filesystem boundaries
-    #[arg(short = 'x', long)]
-    pub one_file_system: bool,
-
-    /// Disable colors
-    #[arg(long)]
-    pub no_color: bool,
 }
 
 #[cfg(test)]
