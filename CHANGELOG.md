@@ -7,13 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-19
+
 ### Changed
 
+- Made the main `rusty-sweeper` binary launch the TUI directly.
+- Split monitor functionality into the dedicated `rusty-sweeper-monitor` binary.
 - Synchronized `README.md`, `SPEC.md`, and the man page with the current implementation status.
 - Documented that `scan --sort mtime` currently falls back to size sorting.
 - Documented that configuration is loaded and validated, but is not yet fully wired into runtime behavior.
 - Documented that Go and Bazel detectors exist in code but are not currently surfaced by project scanning.
 - Corrected the supported cleaner list to include `.NET` and Docker system cleanup.
+
+### Added
+
+- Added Docker system resource cleanup in the TUI and monitor-aware CLI surface.
+
+### Fixed
+
+- Fixed Docker image pruning so unused images are removed.
+- Fixed Ctrl+C handling for monitor mode.
+
+### Removed
+
+- Removed legacy `scan`, `clean`, `tui`, and `completions` subcommands from the main binary.
+- Removed packaged shell completion files for the deleted completion command.
 
 ## [0.1.0] - 2024-12-07
 
@@ -95,4 +113,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uses clap for CLI parsing
 - Uses tracing for logging
 
+[0.2.0]: https://github.com/lelloman/rusty-sweeper/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lelloman/rusty-sweeper/releases/tag/v0.1.0

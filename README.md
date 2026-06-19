@@ -24,7 +24,7 @@ Current limitations:
 ### From Source
 
 ```bash
-git clone https://github.com/user/rusty-sweeper
+git clone https://github.com/lelloman/rusty-sweeper
 cd rusty-sweeper
 cargo install --path .
 ```

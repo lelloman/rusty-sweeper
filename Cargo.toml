@@ -1,9 +1,13 @@
 [package]
 name = "rusty-sweeper"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A Linux disk usage management utility"
 license = "MIT"
+repository = "https://github.com/lelloman/rusty-sweeper"
+homepage = "https://github.com/lelloman/rusty-sweeper"
+documentation = "https://docs.rs/rusty-sweeper"
+readme = "README.md"
 keywords = ["disk", "cleanup", "tui", "linux", "utility"]
 categories = ["command-line-utilities", "filesystem"]
 
