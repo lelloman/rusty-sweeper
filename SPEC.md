@@ -593,7 +593,7 @@ pub struct DiskStatus {
 | 3 | Cleaner | (uses scanner) |
 | 4 | TUI | ratatui, crossterm |
 | 5 | Monitor | notify-rust, nix (for daemon) |
-| 6 | Polish | clap_mangen |
+| 6 | Polish | man page and packaging cleanup |
 
 ---
 

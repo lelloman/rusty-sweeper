@@ -10,7 +10,6 @@ categories = ["command-line-utilities", "filesystem"]
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
-clap_mangen = "0.2"
 
 # Configuration
 serde = { version = "1", features = ["derive"] }
