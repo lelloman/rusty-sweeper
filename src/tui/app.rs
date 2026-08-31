@@ -57,6 +57,17 @@ struct OperationOutcome {
     message: String,
     rescan: bool,
     refresh_system_resources: bool,
+    project_refresh: Option<ProjectRefresh>,
+}
+
+struct ProjectRefresh {
+    project: DetectedProject,
+    artifact_patches: Vec<TreePatch>,
+}
+
+struct TreePatch {
+    path: PathBuf,
+    replacement: Option<DirEntry>,
 }
 
 /// Sort order for entries.
@@ -102,10 +113,52 @@ fn cancelled_outcome(action: &str) -> OperationOutcome {
         message: format!("{} cancelled", action),
         rescan: false,
         refresh_system_resources: false,
+        project_refresh: None,
     }
 }
 
-fn clean_project(project: DetectedProject, cancel: Arc<AtomicBool>) -> OperationOutcome {
+fn refresh_cleaned_project(
+    mut project: DetectedProject,
+    scan_options: &ScanOptions,
+) -> ProjectRefresh {
+    let mut artifact_patches = Vec::with_capacity(project.artifact_paths.len());
+    let mut remaining_artifacts = Vec::new();
+    let mut artifact_size = 0;
+
+    for path in &project.artifact_paths {
+        if path.exists() {
+            remaining_artifacts.push(path.clone());
+            match scan_directory(path, scan_options) {
+                Ok(entry) => {
+                    artifact_size += entry.size;
+                    artifact_patches.push(TreePatch {
+                        path: path.clone(),
+                        replacement: Some(entry),
+                    });
+                }
+                Err(_) => artifact_size += dir_size(path),
+            }
+        } else {
+            artifact_patches.push(TreePatch {
+                path: path.clone(),
+                replacement: None,
+            });
+        }
+    }
+
+    project.artifact_paths = remaining_artifacts;
+    project.artifact_size = artifact_size;
+    ProjectRefresh {
+        project,
+        artifact_patches,
+    }
+}
+
+fn clean_project(
+    project: DetectedProject,
+    scan_options: ScanOptions,
+    cancel: Arc<AtomicBool>,
+) -> OperationOutcome {
     if cancel.load(Ordering::Acquire) {
         return cancelled_outcome("Clean");
     }
@@ -115,6 +168,7 @@ fn clean_project(project: DetectedProject, cancel: Arc<AtomicBool>) -> Operation
             message: "No artifacts to clean".to_string(),
             rescan: false,
             refresh_system_resources: false,
+            project_refresh: None,
         };
     }
     if cancel.load(Ordering::Acquire) {
@@ -123,40 +177,37 @@ fn clean_project(project: DetectedProject, cancel: Arc<AtomicBool>) -> Operation
 
     let orchestrator = CleanOrchestrator::new(DetectorRegistry::new(), CleanOptions::default(), 1);
     let mut results = orchestrator.clean_all(vec![project.clone()], None);
-    match results
+    let (message, refresh_project) = match results
         .pop()
         .expect("one project produces one clean result")
     {
-        CleanResult::Success { freed_bytes, .. } => OperationOutcome {
-            message: format!(
+        CleanResult::Success { freed_bytes, .. } => (
+            format!(
                 "Cleaned {} project, freed {}",
                 project.display_name,
                 humansize::format_size(freed_bytes, humansize::BINARY)
             ),
-            rescan: true,
-            refresh_system_resources: false,
-        },
+            true,
+        ),
         CleanResult::Failed {
             error, freed_bytes, ..
-        } if freed_bytes > 0 => OperationOutcome {
-            message: format!(
+        } if freed_bytes > 0 => (
+            format!(
                 "Project partially cleaned, freed {} before failure: {}",
                 humansize::format_size(freed_bytes, humansize::BINARY),
                 error
             ),
-            rescan: true,
-            refresh_system_resources: false,
-        },
-        CleanResult::Failed { error, .. } => OperationOutcome {
-            message: format!("Clean failed: {}", error),
-            rescan: false,
-            refresh_system_resources: false,
-        },
-        CleanResult::Skipped { reason, .. } => OperationOutcome {
-            message: format!("Clean skipped: {}", reason),
-            rescan: false,
-            refresh_system_resources: false,
-        },
+            true,
+        ),
+        CleanResult::Failed { error, .. } => (format!("Clean failed: {}", error), true),
+        CleanResult::Skipped { reason, .. } => (format!("Clean skipped: {}", reason), false),
+    };
+    let project_refresh = refresh_project.then(|| refresh_cleaned_project(project, &scan_options));
+    OperationOutcome {
+        message,
+        rescan: false,
+        refresh_system_resources: false,
+        project_refresh,
     }
 }
 
@@ -175,6 +226,7 @@ fn clean_system_resource(
             message: "No cleaner found for this resource".to_string(),
             rescan: false,
             refresh_system_resources: false,
+            project_refresh: None,
         };
     };
 
@@ -187,16 +239,19 @@ fn clean_system_resource(
             ),
             rescan: false,
             refresh_system_resources: true,
+            project_refresh: None,
         },
         SystemCleanResult::Failed { error, .. } => OperationOutcome {
             message: format!("Clean failed: {}", error),
             rescan: false,
             refresh_system_resources: false,
+            project_refresh: None,
         },
         SystemCleanResult::Skipped { reason, .. } => OperationOutcome {
             message: format!("Clean skipped: {}", reason),
             rescan: false,
             refresh_system_resources: false,
+            project_refresh: None,
         },
     }
 }
@@ -487,6 +542,65 @@ impl App {
             return true;
         }
         false
+    }
+
+    fn apply_tree_patch(entry: &mut DirEntry, patch: &TreePatch) -> bool {
+        if entry.path == patch.path {
+            if let Some(replacement) = &patch.replacement {
+                *entry = replacement.clone();
+                return true;
+            }
+            return false;
+        }
+
+        if let Some(index) = entry
+            .children
+            .iter()
+            .position(|child| child.path == patch.path)
+        {
+            if let Some(replacement) = &patch.replacement {
+                entry.children[index] = replacement.clone();
+            } else {
+                entry.children.remove(index);
+            }
+            entry.recalculate_totals();
+            return true;
+        }
+
+        for child in &mut entry.children {
+            if patch.path.starts_with(&child.path) && Self::apply_tree_patch(child, patch) {
+                entry.recalculate_totals();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn apply_project_refresh(&mut self, refresh: ProjectRefresh) {
+        let selected_path = self.selected_entry().and_then(|entry| {
+            (!entry.is_separator && entry.system_resource.is_none())
+                .then(|| entry.entry.path.clone())
+        });
+
+        if let Some(tree) = &mut self.tree {
+            for patch in &refresh.artifact_patches {
+                Self::apply_tree_patch(tree, patch);
+            }
+        }
+        let project_path = refresh.project.path.clone();
+        self.detected_projects
+            .insert(project_path.clone(), refresh.project);
+        self.expanded.retain(|path| path.exists());
+        self.rebuild_visible_entries();
+
+        let selection_path = selected_path.unwrap_or(project_path);
+        if let Some(index) = self.visible_entries.iter().position(|entry| {
+            entry.system_resource.is_none()
+                && !entry.is_separator
+                && entry.entry.path == selection_path
+        }) {
+            self.selected = index;
+        }
     }
 
     /// Recursively flatten the tree into visible_entries.
@@ -837,6 +951,9 @@ impl App {
         if outcome.refresh_system_resources {
             self.start_system_detection();
         }
+        if let Some(refresh) = outcome.project_refresh {
+            self.apply_project_refresh(refresh);
+        }
         if outcome.rescan {
             self.post_operation_message = Some(message.clone());
             self.cancel_scan();
@@ -944,6 +1061,7 @@ impl App {
                         message: "Delete cancelled".to_string(),
                         rescan: false,
                         refresh_system_resources: false,
+                        project_refresh: None,
                     };
                 }
                 match delete_path(&path) {
@@ -951,11 +1069,13 @@ impl App {
                         message: format!("Deleted: {}", display_path),
                         rescan: true,
                         refresh_system_resources: false,
+                        project_refresh: None,
                     },
                     Err(error) => OperationOutcome {
                         message: format!("Error: {}", error),
                         rescan: false,
                         refresh_system_resources: false,
+                        project_refresh: None,
                     },
                 }
             },
@@ -994,10 +1114,12 @@ impl App {
             self.status_message = Some("Not a recognized project".to_string());
             return;
         };
+        let mut scan_options = self.scan_options.clone();
+        scan_options.include_hidden = true;
         self.start_operation(
             OperationKind::Clean,
             format!("Cleaning {}...", path.display()),
-            move |cancel| clean_project(project, cancel),
+            move |cancel| clean_project(project, scan_options, cancel),
         );
     }
 
@@ -1603,6 +1725,10 @@ mod tests {
 
         // Target should be removed (regardless of whether cargo clean or direct deletion was used)
         assert!(!target_dir.exists());
+        assert!(
+            !app.scanning,
+            "project cleanup should patch the existing tree without starting a root rescan"
+        );
         assert!(app.status_message.is_some());
         // The clean succeeded - should contain "Cleaned" or show freed space
         let msg = app.status_message.as_ref().unwrap();
