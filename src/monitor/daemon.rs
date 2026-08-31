@@ -16,6 +16,14 @@ pub struct DaemonPaths {
     pub log_file: PathBuf,
 }
 
+/// Identity recorded for a daemon process. Linux PIDs can be reused, so the
+/// process start time is stored alongside the numeric PID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PidRecord {
+    pid: i32,
+    start_time: u64,
+}
+
 impl DaemonPaths {
     pub fn new() -> Self {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
@@ -49,9 +57,9 @@ impl Default for DaemonPaths {
 /// Daemonize the current process
 pub fn daemonize(paths: &DaemonPaths) -> Result<()> {
     // Check if already running
-    if let Some(pid) = read_pid_file(&paths.pid_file) {
-        if is_process_running(pid) {
-            return Err(SweeperError::AlreadyRunning(pid as u32));
+    if let Some(record) = read_pid_file(&paths.pid_file) {
+        if is_process_running(record) {
+            return Err(SweeperError::AlreadyRunning(record.pid as u32));
         }
         // Stale PID file, remove it
         let _ = fs::remove_file(&paths.pid_file);
@@ -122,21 +130,49 @@ fn redirect_stdio(paths: &DaemonPaths) -> Result<()> {
 
 /// Write current PID to file
 fn write_pid_file(path: &PathBuf) -> Result<()> {
-    let pid = std::process::id();
+    let pid = std::process::id() as i32;
+    let start_time = process_start_time(pid).ok_or_else(|| {
+        SweeperError::Other("Could not determine daemon process start time".to_string())
+    })?;
     let mut file = File::create(path)?;
-    writeln!(file, "{}", pid)?;
+    writeln!(file, "{} {}", pid, start_time)?;
     Ok(())
 }
 
 /// Read PID from file
-fn read_pid_file(path: &PathBuf) -> Option<i32> {
-    fs::read_to_string(path).ok()?.trim().parse().ok()
+fn read_pid_file(path: &PathBuf) -> Option<PidRecord> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut fields = contents.split_whitespace();
+    let pid = fields.next()?.parse::<i32>().ok()?;
+    let start_time = fields.next()?.parse::<u64>().ok()?;
+
+    if fields.next().is_some() || pid < 2 || start_time == 0 {
+        return None;
+    }
+
+    Some(PidRecord { pid, start_time })
 }
 
-/// Check if a process is running
-fn is_process_running(pid: i32) -> bool {
-    // Try to send signal 0 (doesn't actually send a signal, just checks)
-    nix::sys::signal::kill(Pid::from_raw(pid), None).is_ok()
+/// Read field 22 (`starttime`) from `/proc/<pid>/stat`.
+fn process_start_time(pid: i32) -> Option<u64> {
+    if pid < 2 {
+        return None;
+    }
+
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The second field is a parenthesized command name and may contain spaces.
+    let command_end = stat.rfind(')')?;
+    stat.get(command_end + 1..)?
+        .split_whitespace()
+        .nth(19)
+        .and_then(|value| value.parse().ok())
+}
+
+/// Check that the recorded process is still running and is the same process,
+/// rather than a different process that reused its PID.
+fn is_process_running(record: PidRecord) -> bool {
+    nix::sys::signal::kill(Pid::from_raw(record.pid), None).is_ok()
+        && process_start_time(record.pid) == Some(record.start_time)
 }
 
 /// Remove PID file on shutdown
@@ -146,20 +182,20 @@ pub fn cleanup_pid_file(paths: &DaemonPaths) {
 
 /// Stop a running daemon
 pub fn stop_daemon(paths: &DaemonPaths) -> Result<bool> {
-    if let Some(pid) = read_pid_file(&paths.pid_file) {
-        if is_process_running(pid) {
-            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM)?;
+    if let Some(record) = read_pid_file(&paths.pid_file) {
+        if is_process_running(record) {
+            nix::sys::signal::kill(Pid::from_raw(record.pid), nix::sys::signal::Signal::SIGTERM)?;
 
             // Wait a bit and check if it stopped
             std::thread::sleep(std::time::Duration::from_secs(1));
 
-            if !is_process_running(pid) {
+            if !is_process_running(record) {
                 let _ = fs::remove_file(&paths.pid_file);
                 return Ok(true);
             }
 
             // Force kill
-            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL)?;
+            nix::sys::signal::kill(Pid::from_raw(record.pid), nix::sys::signal::Signal::SIGKILL)?;
             let _ = fs::remove_file(&paths.pid_file);
             return Ok(true);
         }
@@ -171,8 +207,8 @@ pub fn stop_daemon(paths: &DaemonPaths) -> Result<bool> {
 /// Get status of daemon
 pub fn daemon_status(paths: &DaemonPaths) -> Option<u32> {
     read_pid_file(&paths.pid_file)
-        .filter(|&pid| is_process_running(pid))
-        .map(|pid| pid as u32)
+        .filter(|&record| is_process_running(record))
+        .map(|record| record.pid as u32)
 }
 
 #[cfg(test)]
@@ -198,18 +234,49 @@ mod tests {
         // Read PID
         let pid = read_pid_file(&pid_path);
         assert!(pid.is_some());
-        assert_eq!(pid.unwrap(), std::process::id() as i32);
+        assert_eq!(pid.unwrap().pid, std::process::id() as i32);
+    }
+
+    #[test]
+    fn test_pid_file_rejects_unsafe_pid_values() {
+        let temp = tempdir().unwrap();
+        let pid_path = temp.path().join("test.pid");
+
+        for unsafe_pid in ["0", "1", "-1", "-999"] {
+            fs::write(&pid_path, unsafe_pid).unwrap();
+            assert!(
+                read_pid_file(&pid_path).is_none(),
+                "unsafe PID {unsafe_pid} must be rejected"
+            );
+        }
     }
 
     #[test]
     fn test_is_process_running() {
         // Current process should be running
         let pid = std::process::id() as i32;
-        assert!(is_process_running(pid));
+        let record = PidRecord {
+            pid,
+            start_time: process_start_time(pid).unwrap(),
+        };
+        assert!(is_process_running(record));
 
         // Non-existent process should not be running
         // Use a high PID that's unlikely to exist
-        assert!(!is_process_running(99999));
+        assert!(!is_process_running(PidRecord {
+            pid: 99999,
+            start_time: 1,
+        }));
+    }
+
+    #[test]
+    fn test_process_identity_rejects_wrong_start_time() {
+        let pid = std::process::id() as i32;
+        let start_time = process_start_time(pid).unwrap();
+        assert!(!is_process_running(PidRecord {
+            pid,
+            start_time: start_time + 1,
+        }));
     }
 
     #[test]
