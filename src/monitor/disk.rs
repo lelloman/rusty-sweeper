@@ -60,23 +60,47 @@ pub fn get_mount_points() -> Result<Vec<MountPoint>> {
             continue;
         }
 
-        let device = parts[0];
-        let mount_point = parts[1];
+        let device = decode_mount_field(parts[0]);
+        let mount_point = decode_mount_field(parts[1]);
         let fs_type = parts[2];
 
         // Skip virtual filesystems
-        if is_virtual_filesystem(fs_type, device, mount_point) {
+        if is_virtual_filesystem(fs_type, &device, &mount_point) {
             continue;
         }
 
         mounts.push(MountPoint {
-            device: device.to_string(),
+            device,
             path: PathBuf::from(mount_point),
             fs_type: fs_type.to_string(),
         });
     }
 
     Ok(mounts)
+}
+
+/// Decode the octal escapes used for fields in `/proc/mounts`.
+fn decode_mount_field(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 3 < bytes.len() {
+            let digits = &bytes[index + 1..index + 4];
+            if digits.iter().all(|digit| matches!(digit, b'0'..=b'7')) {
+                let value = (digits[0] - b'0') * 64 + (digits[1] - b'0') * 8 + (digits[2] - b'0');
+                decoded.push(value);
+                index += 4;
+                continue;
+            }
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 /// Check if a filesystem type is virtual (not real disk)
@@ -226,6 +250,14 @@ mod tests {
 
         assert!(!is_virtual_filesystem("ext4", "/dev/sda1", "/"));
         assert!(!is_virtual_filesystem("xfs", "/dev/nvme0n1p2", "/home"));
+    }
+
+    #[test]
+    fn test_decode_mount_field_unescapes_proc_mount_sequences() {
+        assert_eq!(decode_mount_field(r"/media/My\040Disk"), "/media/My Disk");
+        assert_eq!(decode_mount_field(r"tab\011name"), "tab\tname");
+        assert_eq!(decode_mount_field(r"line\012name"), "line\nname");
+        assert_eq!(decode_mount_field(r"slash\134name"), r"slash\name");
     }
 
     #[test]
