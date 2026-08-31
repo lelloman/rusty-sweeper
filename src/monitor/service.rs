@@ -136,10 +136,15 @@ impl MonitorService {
                 status.percent as u32
             );
 
-            // Send via primary notifier
-            if let Err(e) = self.notifier.send_alert(level, status) {
-                tracing::error!("Failed to send notification: {}", e);
-            }
+            // Only advance alert state after the primary notification (which
+            // may itself contain an automatic fallback chain) is delivered.
+            let delivered = match self.notifier.send_alert(level, status) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::error!("Failed to send notification: {}", e);
+                    false
+                }
+            };
 
             // Also send via i3-nagbar for critical/emergency
             if level >= AlertLevel::Critical {
@@ -149,9 +154,16 @@ impl MonitorService {
                     }
                 }
             }
+
+            if delivered {
+                self.last_alerts.insert(status.mount_point.clone(), level);
+            }
+
+            return Ok(());
         }
 
-        // Update last alert level
+        // Record normal/decreased levels even though they do not notify, so a
+        // later increase can alert again.
         self.last_alerts.insert(status.mount_point.clone(), level);
 
         Ok(())
@@ -166,6 +178,32 @@ impl MonitorService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SweeperError;
+    use crate::monitor::types::NotificationUrgency;
+    use std::sync::atomic::AtomicUsize;
+
+    struct FailingNotifier {
+        attempts: Arc<AtomicUsize>,
+    }
+
+    impl Notifier for FailingNotifier {
+        fn name(&self) -> &'static str {
+            "failing-test-notifier"
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn send_alert(&self, _level: AlertLevel, _status: &DiskStatus) -> Result<()> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            Err(SweeperError::Other("injected notification failure".into()))
+        }
+
+        fn send(&self, _title: &str, _body: &str, _urgency: NotificationUrgency) -> Result<()> {
+            Err(SweeperError::Other("injected notification failure".into()))
+        }
+    }
 
     #[test]
     fn test_monitor_service_creation() {
@@ -212,5 +250,36 @@ mod tests {
         // External flag controls the service
         running.store(false, Ordering::SeqCst);
         assert!(!flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_failed_alert_is_retried_at_same_level() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let mut service = MonitorService {
+            options: MonitorOptions::default(),
+            notifier: Box::new(FailingNotifier {
+                attempts: Arc::clone(&attempts),
+            }),
+            i3_notifier: None,
+            running: Arc::new(AtomicBool::new(true)),
+            last_alerts: HashMap::new(),
+        };
+        let status = DiskStatus {
+            mount_point: PathBuf::from("/test"),
+            device: None,
+            total: 100,
+            used: 85,
+            available: 15,
+            percent: 85.0,
+        };
+
+        service
+            .maybe_send_alert(AlertLevel::Warning, &status)
+            .unwrap();
+        service
+            .maybe_send_alert(AlertLevel::Warning, &status)
+            .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 }
