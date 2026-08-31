@@ -21,6 +21,12 @@ Current limitations:
 
 ## Installation
 
+### From crates.io
+
+```bash
+cargo install rusty-sweeper
+```
+
 ### From Source
 
 ```bash

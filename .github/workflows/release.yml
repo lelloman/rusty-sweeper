@@ -24,16 +24,11 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Generate completions
-        run: |
-          mkdir -p dist/pkg
-          ./target/release/rusty-sweeper completions bash > dist/pkg/rusty-sweeper.bash
-          ./target/release/rusty-sweeper completions zsh > dist/pkg/_rusty-sweeper
-          ./target/release/rusty-sweeper completions fish > dist/pkg/rusty-sweeper.fish
-
       - name: Create tarball
         run: |
+          mkdir -p dist/pkg
           cp target/release/rusty-sweeper dist/pkg/
+          cp target/release/rusty-sweeper-monitor dist/pkg/
           cp README.md dist/pkg/
           cp LICENSE dist/pkg/ 2>/dev/null || true
           cp dist/man/rusty-sweeper.1 dist/pkg/

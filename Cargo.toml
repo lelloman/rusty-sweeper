@@ -1,6 +1,6 @@
 [package]
 name = "rusty-sweeper"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A Linux disk usage management utility"
 license = "MIT"
@@ -10,6 +10,7 @@ documentation = "https://docs.rs/rusty-sweeper"
 readme = "README.md"
 keywords = ["disk", "cleanup", "tui", "linux", "utility"]
 categories = ["command-line-utilities", "filesystem"]
+exclude = ["AUDIT_REPORT.md", "PHASE*_PLAN.md", "SPEC.md"]
 
 [dependencies]
 # CLI
