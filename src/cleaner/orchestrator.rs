@@ -143,8 +143,9 @@ impl CleanOrchestrator {
                     summary.success_count += 1;
                     summary.total_freed += freed_bytes;
                 }
-                CleanResult::Failed { .. } => {
+                CleanResult::Failed { freed_bytes, .. } => {
                     summary.failed_count += 1;
+                    summary.total_freed += freed_bytes;
                 }
                 CleanResult::Skipped { .. } => {
                     summary.skipped_count += 1;
@@ -258,6 +259,7 @@ mod tests {
                     artifact_paths: vec![],
                 },
                 error: "oops".into(),
+                freed_bytes: 50,
             },
             CleanResult::Skipped {
                 project: DetectedProject {
@@ -276,7 +278,7 @@ mod tests {
         assert_eq!(summary.success_count, 2);
         assert_eq!(summary.failed_count, 1);
         assert_eq!(summary.skipped_count, 1);
-        assert_eq!(summary.total_freed, 300);
+        assert_eq!(summary.total_freed, 350);
     }
 
     #[test]

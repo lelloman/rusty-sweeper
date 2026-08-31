@@ -19,6 +19,8 @@ pub enum CleanResult {
     Failed {
         project: DetectedProject,
         error: String,
+        /// Bytes removed before the operation failed.
+        freed_bytes: u64,
     },
     /// Cleaning was skipped.
     Skipped {
@@ -95,9 +97,10 @@ impl CleanExecutor {
                 project: project.clone(),
                 freed_bytes: freed,
             },
-            Err(e) => CleanResult::Failed {
+            Err((e, freed_bytes)) => CleanResult::Failed {
                 project: project.clone(),
                 error: e.to_string(),
+                freed_bytes,
             },
         }
     }
@@ -123,13 +126,15 @@ impl CleanExecutor {
         }
     }
 
-    fn delete_artifacts(&self, project: &DetectedProject) -> io::Result<u64> {
+    fn delete_artifacts(&self, project: &DetectedProject) -> Result<u64, (io::Error, u64)> {
         let mut freed = 0u64;
 
         for artifact_path in &project.artifact_paths {
             if artifact_path.exists() {
                 let size = Self::dir_size(artifact_path);
-                fs::remove_dir_all(artifact_path)?;
+                if let Err(error) = fs::remove_dir_all(artifact_path) {
+                    return Err((error, freed));
+                }
                 freed += size;
             }
         }
@@ -292,11 +297,44 @@ mod tests {
         let _failed = CleanResult::Failed {
             project: project.clone(),
             error: "error".to_string(),
+            freed_bytes: 0,
         };
 
         let _skipped = CleanResult::Skipped {
             project,
             reason: "reason".to_string(),
         };
+    }
+
+    #[test]
+    fn test_clean_reports_bytes_removed_before_failure() {
+        let tmp = TempDir::new().unwrap();
+        let removable = tmp.path().join("removable");
+        let invalid = tmp.path().join("not-a-directory");
+        fs::create_dir(&removable).unwrap();
+        fs::write(removable.join("artifact"), "x".repeat(100)).unwrap();
+        fs::write(&invalid, "file").unwrap();
+        let project = DetectedProject {
+            path: tmp.path().to_path_buf(),
+            project_type: "test".into(),
+            display_name: "Test".into(),
+            artifact_size: 104,
+            artifact_paths: vec![removable.clone(), invalid],
+        };
+        let executor = CleanExecutor::new(CleanOptions {
+            dry_run: false,
+            use_native_commands: false,
+        });
+
+        let result = executor.clean(&project, None);
+
+        assert!(!removable.exists());
+        assert!(matches!(
+            result,
+            CleanResult::Failed {
+                freed_bytes: 100,
+                ..
+            }
+        ));
     }
 }

@@ -329,6 +329,39 @@ fn test_tui_clean_confirmation_pins_original_target() {
 }
 
 #[test]
+fn test_tui_partial_clean_reports_freed_space_and_refreshes_tree() {
+    let temp = tempdir().unwrap();
+    let build = temp.path().join("build");
+    let invalid_artifact = temp.path().join(".gradle");
+    fs::write(temp.path().join("build.gradle"), "").unwrap();
+    fs::create_dir(&build).unwrap();
+    fs::write(build.join("artifact.bin"), "x".repeat(128)).unwrap();
+    // The detector currently accepts any existing artifact path. A regular
+    // file forces remove_dir_all to fail after build/ has been removed.
+    fs::write(&invalid_artifact, "not a directory").unwrap();
+
+    let mut app = App::new(temp.path().to_path_buf());
+    app.initial_scan();
+    assert!(app
+        .visible_entries
+        .iter()
+        .any(|entry| entry.entry.path == build));
+
+    app.clean_selected();
+
+    assert!(!build.exists());
+    assert!(
+        !app.visible_entries
+            .iter()
+            .any(|entry| entry.entry.path == build),
+        "the tree must refresh after a partially successful cleanup"
+    );
+    let status = app.status_message.as_deref().unwrap_or_default();
+    assert!(status.contains("partially cleaned"));
+    assert!(status.contains("128 B"));
+}
+
+#[test]
 fn test_tui_help_mode() {
     let mut app = App::new(PathBuf::from("/"));
 

@@ -696,8 +696,19 @@ impl App {
                         ));
                         self.trigger_rescan();
                     }
-                    CleanResult::Failed { error, .. } => {
-                        self.status_message = Some(format!("Clean failed: {}", error));
+                    CleanResult::Failed {
+                        error, freed_bytes, ..
+                    } => {
+                        if freed_bytes > 0 {
+                            let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
+                            self.status_message = Some(format!(
+                                "Project partially cleaned, freed {} before failure: {}",
+                                freed_str, error
+                            ));
+                            self.trigger_rescan();
+                        } else {
+                            self.status_message = Some(format!("Clean failed: {}", error));
+                        }
                     }
                     CleanResult::Skipped { reason, .. } => {
                         self.status_message = Some(format!("Clean skipped: {}", reason));
