@@ -34,22 +34,40 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
     app.detect_system = true;
     app.start_initial_scan();
 
-    // Main loop
-    while !app.should_quit {
-        // Poll for scan results from background thread
-        app.poll_scan_result();
+    run_with_cleanup(
+        || {
+            // Main loop
+            while !app.should_quit {
+                // Poll for scan results from background thread
+                app.poll_scan_result();
 
-        // Render
-        terminal.draw(|frame| render(&app, frame))?;
+                // Render
+                terminal.draw(|frame| render(&app, frame))?;
 
-        // Handle events (with 100ms timeout for responsive UI)
-        handle_events(&mut app, Duration::from_millis(100))?;
+                // Handle events (with 100ms timeout for responsive UI)
+                handle_events(&mut app, Duration::from_millis(100))?;
+            }
+
+            Ok(())
+        },
+        restore_terminal,
+    )
+}
+
+/// Run a TUI operation and restore terminal state on both success and ordinary
+/// error returns. Panics are handled separately by the installed panic hook.
+fn run_with_cleanup<T>(
+    operation: impl FnOnce() -> anyhow::Result<T>,
+    cleanup: impl FnOnce() -> io::Result<()>,
+) -> anyhow::Result<T> {
+    let operation_result = operation();
+    let cleanup_result = cleanup();
+
+    match (operation_result, cleanup_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(cleanup_error)) => Err(cleanup_error.into()),
+        (Err(operation_error), _) => Err(operation_error),
     }
-
-    // Cleanup
-    restore_terminal()?;
-
-    Ok(())
 }
 
 /// Type alias for our terminal backend.
@@ -60,9 +78,18 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 /// This enables raw mode and switches to the alternate screen buffer.
 pub fn init_terminal() -> io::Result<Tui> {
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
+    if let Err(error) = execute!(stdout(), EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(error);
+    }
     let backend = CrosstermBackend::new(stdout());
-    Terminal::new(backend)
+    match Terminal::new(backend) {
+        Ok(terminal) => Ok(terminal),
+        Err(error) => {
+            let _ = restore_terminal();
+            Err(error)
+        }
+    }
 }
 
 /// Restore the terminal to its original state.
@@ -88,11 +115,28 @@ pub fn install_panic_hook() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn test_restore_terminal_without_init_is_safe() {
         // Calling restore without init should not panic
         // (it may fail, but shouldn't crash)
         let _ = restore_terminal();
+    }
+
+    #[test]
+    fn test_cleanup_runs_when_tui_loop_returns_error() {
+        let cleaned = AtomicBool::new(false);
+
+        let result: anyhow::Result<()> = run_with_cleanup(
+            || Err(anyhow::anyhow!("injected event-loop failure")),
+            || {
+                cleaned.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(cleaned.load(Ordering::SeqCst));
     }
 }
