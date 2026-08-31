@@ -38,6 +38,22 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
+    /// Clone this entry's display metadata without recursively cloning children.
+    pub fn shallow_clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            name: self.name.clone(),
+            is_dir: self.is_dir,
+            size: self.size,
+            disk_usage: self.disk_usage,
+            file_count: self.file_count,
+            dir_count: self.dir_count,
+            mtime: self.mtime,
+            children: Vec::new(),
+            error: self.error.clone(),
+        }
+    }
+
     /// Create a new file entry from metadata
     pub fn new_file(path: PathBuf, size: u64, disk_usage: u64, mtime: Option<SystemTime>) -> Self {
         let name = path

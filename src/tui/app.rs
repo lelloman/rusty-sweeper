@@ -251,8 +251,11 @@ impl App {
             });
         }
 
-        if let Some(tree) = self.tree.clone() {
+        // Temporarily move the tree out so flattening can mutate the row list
+        // without cloning the complete scan result.
+        if let Some(tree) = self.tree.take() {
             self.flatten_tree(&tree, 0);
+            self.tree = Some(tree);
         }
 
         // Ensure selection is valid
@@ -296,7 +299,7 @@ impl App {
         };
 
         self.visible_entries.push(VisibleEntry {
-            entry: entry.clone(),
+            entry: entry.shallow_clone(),
             depth,
             is_expanded,
             project_type,
@@ -967,6 +970,20 @@ mod tests {
         assert_eq!(app.visible_entries[1].depth, 1);
         assert_eq!(app.visible_entries[2].entry.name, "dir_a");
         assert_eq!(app.visible_entries[2].depth, 1);
+    }
+
+    #[test]
+    fn test_visible_entries_do_not_clone_descendant_trees() {
+        let mut app = App::new(PathBuf::from("/root"));
+        app.tree = Some(create_test_tree());
+        app.expanded.insert(PathBuf::from("/root"));
+        app.rebuild_visible_entries();
+
+        assert!(app.tree.as_ref().unwrap().children.len() > 1);
+        assert!(app
+            .visible_entries
+            .iter()
+            .all(|visible| visible.entry.children.is_empty()));
     }
 
     #[test]
