@@ -56,7 +56,12 @@ pub enum AlertLevel {
 impl AlertLevel {
     /// Determine alert level from usage percentage and thresholds
     pub fn from_percent(percent: f32, warn: u8, critical: u8) -> Self {
-        if percent >= 95.0 {
+        // Emergency normally begins at 95%, but it must remain above the
+        // configured critical threshold so every configured level is
+        // reachable. For very high critical thresholds this may move the
+        // emergency boundary to 100% or beyond.
+        let emergency_threshold = 95.0_f32.max(critical as f32 + 1.0);
+        if percent >= emergency_threshold {
             AlertLevel::Emergency
         } else if percent >= critical as f32 {
             AlertLevel::Critical
@@ -152,6 +157,16 @@ mod tests {
         );
         assert_eq!(
             AlertLevel::from_percent(99.0, 80, 90),
+            AlertLevel::Emergency
+        );
+    }
+
+    #[test]
+    fn test_custom_thresholds_above_95_remain_reachable() {
+        assert_eq!(AlertLevel::from_percent(96.0, 96, 99), AlertLevel::Warning);
+        assert_eq!(AlertLevel::from_percent(99.0, 96, 99), AlertLevel::Critical);
+        assert_eq!(
+            AlertLevel::from_percent(100.0, 96, 99),
             AlertLevel::Emergency
         );
     }
