@@ -86,6 +86,7 @@ fn scan_directory_inner(
 
     // Collect all entries, building a path -> entry map
     let mut entries: HashMap<PathBuf, DirEntry> = HashMap::new();
+    let visited_files = Arc::new(Mutex::new(HashSet::new()));
 
     for result in walker {
         let entry = match result {
@@ -136,7 +137,8 @@ fn scan_directory_inner(
         let dir_entry = if metadata.is_dir() {
             DirEntry::new_dir(path.clone(), metadata.modified().ok())
         } else {
-            let (apparent_size, disk_usage) = cache.sizes(&path, &metadata);
+            let (apparent_size, disk_usage) =
+                accounted_file_sizes(cache, &path, &metadata, &visited_files);
             DirEntry::new_file(
                 path.clone(),
                 apparent_size,
@@ -150,6 +152,24 @@ fn scan_directory_inner(
 
     // Build tree from flat map
     build_tree(&root, entries)
+}
+
+fn accounted_file_sizes(
+    cache: &MetadataCache,
+    path: &Path,
+    metadata: &fs::Metadata,
+    visited_files: &Arc<Mutex<HashSet<(u64, u64)>>>,
+) -> (u64, u64) {
+    let sizes = cache.sizes(path, metadata);
+    let first_link = visited_files
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert((metadata.dev(), metadata.ino()));
+    if first_link {
+        sizes
+    } else {
+        (0, 0)
+    }
 }
 
 fn should_visit_path(
@@ -329,7 +349,17 @@ fn scan_directory_parallel_inner(
     };
 
     let visited_dirs = Arc::new(Mutex::new(HashSet::new()));
-    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev, &visited_dirs, cache)
+    let visited_files = Arc::new(Mutex::new(HashSet::new()));
+    scan_dir_recursive_parallel(
+        &root,
+        &root,
+        options,
+        0,
+        root_dev,
+        &visited_dirs,
+        &visited_files,
+        cache,
+    )
 }
 
 fn scan_dir_recursive_parallel(
@@ -339,6 +369,7 @@ fn scan_dir_recursive_parallel(
     depth: usize,
     root_dev: Option<u64>,
     visited_dirs: &Arc<Mutex<HashSet<(u64, u64)>>>,
+    visited_files: &Arc<Mutex<HashSet<(u64, u64)>>>,
     cache: &MetadataCache,
 ) -> Result<DirEntry> {
     use rayon::prelude::*;
@@ -378,7 +409,8 @@ fn scan_dir_recursive_parallel(
 
     // If it's a file, return immediately
     if !metadata.is_dir() {
-        let (apparent_size, disk_usage) = cache.sizes(path, &metadata);
+        let (apparent_size, disk_usage) =
+            accounted_file_sizes(cache, path, &metadata, visited_files);
         return Ok(DirEntry::new_file(
             path.to_path_buf(),
             apparent_size,
@@ -432,6 +464,7 @@ fn scan_dir_recursive_parallel(
                 depth + 1,
                 root_dev,
                 visited_dirs,
+                visited_files,
                 cache,
             )
             .ok()
@@ -490,6 +523,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     };
 
     let visited_dirs = Arc::new(Mutex::new(HashSet::new()));
+    let visited_files = Arc::new(Mutex::new(HashSet::new()));
     if options.follow_symlinks {
         visited_dirs
             .lock()
@@ -539,6 +573,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
                 1,
                 root_dev,
                 &visited_dirs,
+                &visited_files,
                 &cache,
             )
         };
@@ -773,6 +808,44 @@ mod tests {
         // Subdir should also have combined size
         let subdir = result.children.iter().find(|c| c.name == "subdir").unwrap();
         assert_eq!(subdir.size, 300);
+    }
+
+    #[test]
+    fn test_scanners_count_hard_link_storage_once() {
+        use crate::scanner::size::disk_usage;
+
+        let dir = TempDir::new().unwrap();
+        let original = dir.path().join("original.bin");
+        let alias = dir.path().join("alias.bin");
+        fs::write(&original, vec![b'x'; 128]).unwrap();
+        fs::hard_link(&original, &alias).unwrap();
+        let expected_disk_usage = disk_usage(&fs::metadata(&original).unwrap());
+        let options = ScanOptions::new();
+
+        for tree in [
+            scan_directory(dir.path(), &options).unwrap(),
+            scan_directory_parallel(dir.path(), &options).unwrap(),
+        ] {
+            assert_eq!(tree.size, 128);
+            assert_eq!(tree.disk_usage, expected_disk_usage);
+            assert_eq!(tree.file_count, 2);
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        scan_directory_progressive(dir.path(), &options, tx);
+        let deltas: Vec<_> = rx
+            .into_iter()
+            .filter_map(|update| match update {
+                ScanUpdate::Entry { entry, .. } => Some(entry),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas.iter().map(|entry| entry.size).sum::<u64>(), 128);
+        assert_eq!(
+            deltas.iter().map(|entry| entry.disk_usage).sum::<u64>(),
+            expected_disk_usage
+        );
+        assert_eq!(deltas.iter().map(|entry| entry.file_count).sum::<u64>(), 2);
     }
 
     #[test]
