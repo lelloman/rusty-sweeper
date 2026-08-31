@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
 use crate::error::{Result, SweeperError};
@@ -276,7 +277,8 @@ pub fn scan_directory_parallel(root: &Path, options: &ScanOptions) -> Result<Dir
         None
     };
 
-    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev)
+    let visited_dirs = Arc::new(Mutex::new(HashSet::new()));
+    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev, &visited_dirs)
 }
 
 fn scan_dir_recursive_parallel(
@@ -285,6 +287,7 @@ fn scan_dir_recursive_parallel(
     options: &ScanOptions,
     depth: usize,
     root_dev: Option<u64>,
+    visited_dirs: &Arc<Mutex<HashSet<(u64, u64)>>>,
 ) -> Result<DirEntry> {
     use rayon::prelude::*;
 
@@ -331,6 +334,18 @@ fn scan_dir_recursive_parallel(
         ));
     }
 
+    if options.follow_symlinks {
+        let identity = (metadata.dev(), metadata.ino());
+        let mut visited = visited_dirs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !visited.insert(identity) {
+            let mut cycle = DirEntry::new_dir(path.to_path_buf(), metadata.modified().ok());
+            cycle.error = Some("Directory already visited through a symbolic link".to_string());
+            return Ok(cycle);
+        }
+    }
+
     // Check if we've reached the depth limit - if so, return empty directory
     if let Some(max_depth) = options.max_depth {
         if depth >= max_depth {
@@ -357,7 +372,15 @@ fn scan_dir_recursive_parallel(
         .par_iter()
         .filter_map(|entry| {
             let child_path = entry.path();
-            scan_dir_recursive_parallel(&child_path, root, options, depth + 1, root_dev).ok()
+            scan_dir_recursive_parallel(
+                &child_path,
+                root,
+                options,
+                depth + 1,
+                root_dev,
+                visited_dirs,
+            )
+            .ok()
         })
         .collect();
 
@@ -401,6 +424,14 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         None
     };
 
+    let visited_dirs = Arc::new(Mutex::new(HashSet::new()));
+    if options.follow_symlinks {
+        visited_dirs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert((metadata.dev(), metadata.ino()));
+    }
+
     // Read top-level directory entries
     let read_dir = match fs::read_dir(&root) {
         Ok(rd) => rd,
@@ -436,11 +467,17 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         });
 
         // Scan this entry (parallel internally via scan_dir_recursive_parallel)
-        let child_entry =
-            match scan_dir_recursive_parallel(&child_path, &root, options, 1, root_dev) {
-                Ok(e) => e,
-                Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
-            };
+        let child_entry = match scan_dir_recursive_parallel(
+            &child_path,
+            &root,
+            options,
+            1,
+            root_dev,
+            &visited_dirs,
+        ) {
+            Ok(e) => e,
+            Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
+        };
         children.push(child_entry);
     }
 
@@ -743,5 +780,35 @@ mod tests {
 
         assert_eq!(result.file_count, 100);
         assert_eq!(result.dir_count, 10);
+    }
+
+    #[test]
+    fn test_parallel_scan_does_not_follow_symlink_cycle_repeatedly() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("file.txt"), "content").unwrap();
+        symlink(&target, target.join("loop")).unwrap();
+
+        let options = ScanOptions::new()
+            .with_follow_symlinks(true)
+            .with_max_depth(12);
+        let result = scan_directory_parallel(dir.path(), &options).unwrap();
+
+        assert_eq!(result.file_count, 1, "cycle must not duplicate file sizes");
+        let target = result
+            .children
+            .iter()
+            .find(|entry| entry.name == "target")
+            .unwrap();
+        let loop_entry = target
+            .children
+            .iter()
+            .find(|entry| entry.name == "loop")
+            .unwrap();
+        assert!(loop_entry.children.is_empty());
+        assert!(loop_entry.error.is_some());
     }
 }
