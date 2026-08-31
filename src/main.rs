@@ -3,6 +3,7 @@ use clap::Parser;
 
 use rusty_sweeper::cli::{starting_path, Cli};
 use rusty_sweeper::config::Config;
+use rusty_sweeper::scanner::ScanOptions;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -16,8 +17,11 @@ fn main() -> Result<()> {
     tracing::debug!(?config, "Loaded configuration");
 
     let root = starting_path(cli.path)?;
+    let scan_options = ScanOptions::default()
+        .with_threads(config.scanner.parallel_threads)
+        .with_one_file_system(!config.scanner.cross_filesystems);
     tracing::info!(path = %root.display(), "Starting TUI");
-    rusty_sweeper::tui::run(root)?;
+    rusty_sweeper::tui::run_with_scan_options(root, scan_options)?;
 
     Ok(())
 }

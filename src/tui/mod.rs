@@ -25,12 +25,23 @@ use ratatui::prelude::*;
 /// This is the main entry point for the TUI. It initializes the terminal,
 /// performs an initial scan, and enters the main event loop.
 pub fn run(root: PathBuf) -> anyhow::Result<()> {
+    run_with_scan_options(
+        root,
+        crate::scanner::ScanOptions::default().with_one_file_system(true),
+    )
+}
+
+/// Run the TUI with explicit scanner configuration.
+pub fn run_with_scan_options(
+    root: PathBuf,
+    scan_options: crate::scanner::ScanOptions,
+) -> anyhow::Result<()> {
     // Setup
     install_panic_hook();
     let mut terminal = init_terminal()?;
 
     // Initialize app and start background scan
-    let mut app = App::new(root);
+    let mut app = App::with_scan_options(root, scan_options);
     app.detect_system = true;
     app.start_initial_scan();
 

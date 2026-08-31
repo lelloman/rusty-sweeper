@@ -275,6 +275,9 @@ pub struct App {
     /// Root directory being explored.
     pub root: PathBuf,
 
+    /// Scanner behavior supplied by configuration.
+    scan_options: ScanOptions,
+
     /// Scanned directory tree.
     pub tree: Option<DirEntry>,
 
@@ -351,8 +354,14 @@ pub struct App {
 impl App {
     /// Create a new App instance.
     pub fn new(root: PathBuf) -> Self {
+        Self::with_scan_options(root, ScanOptions::default().with_one_file_system(true))
+    }
+
+    /// Create an App with explicit scanner configuration.
+    pub fn with_scan_options(root: PathBuf, scan_options: ScanOptions) -> Self {
         Self {
             root,
+            scan_options,
             tree: None,
             visible_entries: Vec::new(),
             selected: 0,
@@ -684,12 +693,11 @@ impl App {
         self.scan_receiver = Some(rx);
 
         let root = self.root.clone();
+        let mut options = self.scan_options.clone();
+        options.include_hidden = true;
 
         // Spawn background thread for progressive scanning
         let handle = thread::spawn(move || {
-            let options = ScanOptions::default()
-                .with_hidden(true)
-                .with_one_file_system(true);
             scan_directory_progressive(&root, &options, tx);
         });
 
@@ -851,9 +859,8 @@ impl App {
         self.detect_system_resources();
 
         // Always scan with hidden files included so we can toggle visibility in the UI
-        let options = ScanOptions::default()
-            .with_hidden(true)
-            .with_one_file_system(true);
+        let mut options = self.scan_options.clone();
+        options.include_hidden = true;
         match scan_directory(&self.root, &options) {
             Ok(tree) => {
                 // Preserve expanded paths that still exist
@@ -1115,6 +1122,13 @@ mod tests {
         assert!(app.visible_entries.is_empty());
         assert!(app.expanded.is_empty());
         assert_eq!(app.sort_order, SortOrder::Size);
+    }
+
+    #[test]
+    fn test_app_accepts_configured_scanner_threads() {
+        let app = App::with_scan_options(PathBuf::from("/tmp"), ScanOptions::new().with_threads(3));
+
+        assert_eq!(app.scan_options.threads, 3);
     }
 
     #[test]

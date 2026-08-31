@@ -262,6 +262,25 @@ fn recalculate_totals_recursive(entry: &mut DirEntry) {
 
 /// Parallel directory scanner for better performance on large directories
 pub fn scan_directory_parallel(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
+    match configured_thread_pool(options)? {
+        Some(pool) => pool.install(|| scan_directory_parallel_inner(root, options)),
+        None => scan_directory_parallel_inner(root, options),
+    }
+}
+
+fn configured_thread_pool(options: &ScanOptions) -> Result<Option<rayon::ThreadPool>> {
+    if options.threads == 0 {
+        return Ok(None);
+    }
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(options.threads)
+        .build()
+        .map(Some)
+        .map_err(|error| SweeperError::Other(format!("Cannot create scanner thread pool: {error}")))
+}
+
+fn scan_directory_parallel_inner(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
     let root = root.canonicalize().map_err(|e| SweeperError::Io {
         path: root.to_path_buf(),
         source: e,
@@ -401,6 +420,16 @@ fn scan_dir_recursive_parallel(
 /// Scans top-level entries sequentially, sending a tree update after each completes.
 /// Each individual entry is scanned in parallel internally for speed.
 pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender<ScanUpdate>) {
+    let thread_pool = match configured_thread_pool(options) {
+        Ok(pool) => pool,
+        Err(error) => {
+            let _ = tx.send(ScanUpdate::Error {
+                message: error.to_string(),
+            });
+            return;
+        }
+    };
+
     let root = match root.canonicalize() {
         Ok(r) => r,
         Err(e) => {
@@ -469,14 +498,13 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         let child_path = entry.path();
 
         // Scan this entry (parallel internally via scan_dir_recursive_parallel)
-        let child_entry = match scan_dir_recursive_parallel(
-            &child_path,
-            &root,
-            options,
-            1,
-            root_dev,
-            &visited_dirs,
-        ) {
+        let scan_child =
+            || scan_dir_recursive_parallel(&child_path, &root, options, 1, root_dev, &visited_dirs);
+        let child_result = match &thread_pool {
+            Some(pool) => pool.install(scan_child),
+            None => scan_child(),
+        };
+        let child_entry = match child_result {
             Ok(e) => e,
             Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
         };
@@ -746,6 +774,14 @@ mod tests {
         assert!(result.is_dir);
         assert!(result.size > 0);
         assert!(result.file_count >= 3);
+    }
+
+    #[test]
+    fn test_parallel_scanner_builds_configured_thread_pool() {
+        let options = ScanOptions::new().with_threads(2);
+        let pool = configured_thread_pool(&options).unwrap().unwrap();
+
+        assert_eq!(pool.current_num_threads(), 2);
     }
 
     #[test]
