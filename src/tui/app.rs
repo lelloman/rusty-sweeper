@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use nix::sys::statvfs::statvfs;
@@ -37,6 +39,24 @@ pub enum ConfirmAction {
     Delete,
     /// Clean a project's build artifacts.
     Clean,
+}
+
+/// Long-running action currently executing outside the UI thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationKind {
+    Delete,
+    Clean,
+}
+
+struct OperationState {
+    kind: OperationKind,
+    cancel: Arc<AtomicBool>,
+}
+
+struct OperationOutcome {
+    message: String,
+    rescan: bool,
+    refresh_system_resources: bool,
 }
 
 /// Sort order for entries.
@@ -74,6 +94,132 @@ fn delete_path(path: &Path) -> std::io::Result<()> {
         fs::remove_dir_all(path)
     } else {
         fs::remove_file(path)
+    }
+}
+
+fn cancelled_outcome(action: &str) -> OperationOutcome {
+    OperationOutcome {
+        message: format!("{} cancelled", action),
+        rescan: false,
+        refresh_system_resources: false,
+    }
+}
+
+fn clean_project(path: PathBuf, cancel: Arc<AtomicBool>) -> OperationOutcome {
+    if cancel.load(Ordering::Acquire) {
+        return cancelled_outcome("Clean");
+    }
+
+    let registry = DetectorRegistry::new();
+    let Some(detector) = registry
+        .detectors()
+        .iter()
+        .find(|detector| detector.detect(&path))
+    else {
+        return OperationOutcome {
+            message: "Not a recognized project".to_string(),
+            rescan: false,
+            refresh_system_resources: false,
+        };
+    };
+
+    let artifact_paths = detector.find_artifacts(&path);
+    if artifact_paths.is_empty() {
+        return OperationOutcome {
+            message: "No artifacts to clean".to_string(),
+            rescan: false,
+            refresh_system_resources: false,
+        };
+    }
+    let artifact_size = artifact_paths
+        .iter()
+        .map(|artifact| dir_size(artifact))
+        .sum();
+    let project = DetectedProject {
+        path,
+        project_type: detector.id().to_string(),
+        display_name: detector.display_name().to_string(),
+        artifact_size,
+        artifact_paths,
+    };
+    let clean_command = detector.clean_command();
+
+    if cancel.load(Ordering::Acquire) {
+        return cancelled_outcome("Clean");
+    }
+
+    match CleanExecutor::new(CleanOptions::default()).clean(&project, clean_command) {
+        CleanResult::Success { freed_bytes, .. } => OperationOutcome {
+            message: format!(
+                "Cleaned {} project, freed {}",
+                project.display_name,
+                humansize::format_size(freed_bytes, humansize::BINARY)
+            ),
+            rescan: true,
+            refresh_system_resources: false,
+        },
+        CleanResult::Failed {
+            error, freed_bytes, ..
+        } if freed_bytes > 0 => OperationOutcome {
+            message: format!(
+                "Project partially cleaned, freed {} before failure: {}",
+                humansize::format_size(freed_bytes, humansize::BINARY),
+                error
+            ),
+            rescan: true,
+            refresh_system_resources: false,
+        },
+        CleanResult::Failed { error, .. } => OperationOutcome {
+            message: format!("Clean failed: {}", error),
+            rescan: false,
+            refresh_system_resources: false,
+        },
+        CleanResult::Skipped { reason, .. } => OperationOutcome {
+            message: format!("Clean skipped: {}", reason),
+            rescan: false,
+            refresh_system_resources: false,
+        },
+    }
+}
+
+fn clean_system_resource(
+    resource: DetectedSystemResource,
+    cancel: Arc<AtomicBool>,
+) -> OperationOutcome {
+    use crate::cleaner::SystemCleanResult;
+
+    if cancel.load(Ordering::Acquire) {
+        return cancelled_outcome("Clean");
+    }
+    let registry = SystemCleanerRegistry::new();
+    let Some(cleaner) = registry.get_cleaner(&resource.category) else {
+        return OperationOutcome {
+            message: "No cleaner found for this resource".to_string(),
+            rescan: false,
+            refresh_system_resources: false,
+        };
+    };
+
+    match cleaner.clean(&resource, false) {
+        SystemCleanResult::Success { freed_bytes, .. } => OperationOutcome {
+            message: format!(
+                "Cleaned {}, freed {}",
+                resource.display_name,
+                humansize::format_size(freed_bytes, humansize::BINARY)
+            ),
+            rescan: false,
+            refresh_system_resources: true,
+        },
+        SystemCleanResult::Failed { error, .. } => OperationOutcome {
+            message: format!("Clean failed: {}", error),
+            rescan: false,
+            refresh_system_resources: false,
+        },
+        SystemCleanResult::Skipped { reason, .. } => OperationOutcome {
+            message: format!("Clean skipped: {}", reason),
+            rescan: false,
+            refresh_system_resources: false,
+        },
     }
 }
 
@@ -159,6 +305,9 @@ pub struct App {
     /// Status message to display.
     pub status_message: Option<String>,
 
+    /// Action result retained while its automatic rescan is in progress.
+    post_operation_message: Option<String>,
+
     /// Is currently scanning.
     pub scanning: bool,
 
@@ -185,6 +334,18 @@ pub struct App {
     /// Handle to the background scan thread.
     #[allow(dead_code)]
     scan_thread: Option<JoinHandle<()>>,
+
+    /// Current cleanup/deletion operation and its result channel.
+    operation: Option<OperationState>,
+    operation_receiver: Option<Receiver<OperationOutcome>>,
+    #[allow(dead_code)]
+    operation_thread: Option<JoinHandle<()>>,
+
+    /// System-resource discovery runs separately from filesystem scans.
+    system_detection_running: bool,
+    system_receiver: Option<Receiver<Vec<DetectedSystemResource>>>,
+    #[allow(dead_code)]
+    system_thread: Option<JoinHandle<()>>,
 }
 
 impl App {
@@ -202,6 +363,7 @@ impl App {
             show_hidden: false,
             should_quit: false,
             status_message: None,
+            post_operation_message: None,
             scanning: false,
             clean_preview: None,
             confirmation_target: None,
@@ -211,6 +373,12 @@ impl App {
             project_type_cache: HashMap::new(),
             scan_receiver: None,
             scan_thread: None,
+            operation: None,
+            operation_receiver: None,
+            operation_thread: None,
+            system_detection_running: false,
+            system_receiver: None,
+            system_thread: None,
         }
     }
 
@@ -276,6 +444,36 @@ impl App {
         }
         let registry = SystemCleanerRegistry::new();
         self.system_resources = registry.detect_all();
+    }
+
+    fn start_system_detection(&mut self) {
+        if !self.detect_system || self.system_detection_running {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        self.system_receiver = Some(rx);
+        self.system_detection_running = true;
+        self.system_thread = Some(thread::spawn(move || {
+            let resources = SystemCleanerRegistry::new().detect_all();
+            let _ = tx.send(resources);
+        }));
+    }
+
+    fn poll_system_detection(&mut self) -> bool {
+        let resources = self
+            .system_receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(resources) = resources {
+            self.system_resources = resources;
+            self.system_detection_running = false;
+            self.system_receiver = None;
+            self.system_thread = None;
+            self.rebuild_visible_entries();
+            return true;
+        }
+        false
     }
 
     /// Recursively flatten the tree into visible_entries.
@@ -474,10 +672,9 @@ impl App {
             return;
         }
 
-        // Detect system resources first — this is fast (e.g., `docker system df`)
-        // and lets the user see actionable cleanup targets immediately while the
-        // directory tree populates in the background.
-        self.detect_system_resources();
+        // Docker/system queries have their own worker so process startup cannot
+        // stall terminal rendering.
+        self.start_system_detection();
         self.rebuild_visible_entries();
 
         self.scanning = true;
@@ -514,7 +711,9 @@ impl App {
                     self.project_type_cache.clear();
                     self.tree = Some(root);
                     self.rebuild_visible_entries();
-                    self.status_message = Some(format!("Scanning 0/{}", total));
+                    if self.post_operation_message.is_none() {
+                        self.status_message = Some(format!("Scanning 0/{}", total));
+                    }
                 }
                 ScanUpdate::Entry {
                     entry,
@@ -528,8 +727,10 @@ impl App {
                         tree.sort_by_size();
                     }
                     self.rebuild_visible_entries();
-                    self.status_message =
-                        Some(format!("Scanning ({}/{}) {}", completed, total, name));
+                    if self.post_operation_message.is_none() {
+                        self.status_message =
+                            Some(format!("Scanning ({}/{}) {}", completed, total, name));
+                    }
                 }
                 ScanUpdate::Complete => {
                     self.scanning = false;
@@ -546,7 +747,7 @@ impl App {
                     }
 
                     self.rebuild_visible_entries();
-                    self.status_message = None; // Clear to show keybinding hints
+                    self.status_message = self.post_operation_message.take();
                 }
                 ScanUpdate::Error { message } => {
                     self.scanning = false;
@@ -559,6 +760,86 @@ impl App {
         }
 
         false
+    }
+
+    /// Poll all background work performed by the TUI.
+    pub fn poll_background_work(&mut self) -> bool {
+        let operation = self.poll_operation_result();
+        let scan = self.poll_scan_result();
+        let system = self.poll_system_detection();
+        operation || scan || system
+    }
+
+    /// Return the active destructive/cleanup operation, if any.
+    pub fn operation_kind(&self) -> Option<OperationKind> {
+        self.operation.as_ref().map(|operation| operation.kind)
+    }
+
+    /// Request cancellation of the active operation between work phases.
+    pub fn cancel_operation(&mut self) {
+        if let Some(operation) = &self.operation {
+            operation.cancel.store(true, Ordering::Release);
+            self.status_message = Some("Cancelling operation...".to_string());
+        }
+    }
+
+    fn start_operation(
+        &mut self,
+        kind: OperationKind,
+        status: String,
+        work: impl FnOnce(Arc<AtomicBool>) -> OperationOutcome + Send + 'static,
+    ) {
+        if self.operation.is_some() {
+            self.status_message = Some("Another operation is already running".to_string());
+            return;
+        }
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let (tx, rx) = mpsc::channel();
+        self.operation = Some(OperationState { kind, cancel });
+        self.operation_receiver = Some(rx);
+        self.status_message = Some(status);
+        self.operation_thread = Some(thread::spawn(move || {
+            let outcome = work(worker_cancel);
+            let _ = tx.send(outcome);
+        }));
+    }
+
+    /// Apply a completed background operation result without blocking the UI.
+    pub fn poll_operation_result(&mut self) -> bool {
+        let outcome = self
+            .operation_receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(outcome) = outcome else {
+            return false;
+        };
+
+        self.operation = None;
+        self.operation_receiver = None;
+        self.operation_thread = None;
+        let message = outcome.message;
+
+        if outcome.refresh_system_resources {
+            self.start_system_detection();
+        }
+        if outcome.rescan {
+            self.post_operation_message = Some(message.clone());
+            self.cancel_scan();
+            self.start_background_scan();
+        }
+        self.status_message = Some(message);
+        true
+    }
+
+    /// Cancel a filesystem scan by disconnecting its update channel.
+    pub fn cancel_scan(&mut self) {
+        if self.scanning {
+            self.scan_receiver = None;
+            self.scan_thread = None;
+            self.scanning = false;
+        }
     }
 
     /// Trigger a rescan of the root directory (blocking version for tests).
@@ -635,15 +916,32 @@ impl App {
             return;
         }
 
-        match delete_path(&path) {
-            Ok(()) => {
-                self.status_message = Some(format!("Deleted: {}", path.display()));
-                self.trigger_rescan();
-            }
-            Err(e) => {
-                self.status_message = Some(format!("Error: {}", e));
-            }
-        }
+        let display_path = path.display().to_string();
+        self.start_operation(
+            OperationKind::Delete,
+            format!("Deleting: {}", display_path),
+            move |cancel| {
+                if cancel.load(Ordering::Acquire) {
+                    return OperationOutcome {
+                        message: "Delete cancelled".to_string(),
+                        rescan: false,
+                        refresh_system_resources: false,
+                    };
+                }
+                match delete_path(&path) {
+                    Ok(()) => OperationOutcome {
+                        message: format!("Deleted: {}", display_path),
+                        rescan: true,
+                        refresh_system_resources: false,
+                    },
+                    Err(error) => OperationOutcome {
+                        message: format!("Error: {}", error),
+                        rescan: false,
+                        refresh_system_resources: false,
+                    },
+                }
+            },
+        );
     }
 
     /// Clean the selected project or system resource.
@@ -662,96 +960,23 @@ impl App {
         }
 
         // Handle system resource cleaning
-        if let Some(resource) = &entry.system_resource {
-            let registry = SystemCleanerRegistry::new();
-            if let Some(cleaner) = registry.get_cleaner(&resource.category) {
-                use crate::cleaner::SystemCleanResult;
-                match cleaner.clean(resource, false) {
-                    SystemCleanResult::Success { freed_bytes, .. } => {
-                        let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
-                        self.status_message = Some(format!(
-                            "Cleaned {}, freed {}",
-                            resource.display_name, freed_str
-                        ));
-                        self.detect_system_resources();
-                        self.rebuild_visible_entries();
-                    }
-                    SystemCleanResult::Failed { error, .. } => {
-                        self.status_message = Some(format!("Clean failed: {}", error));
-                    }
-                    SystemCleanResult::Skipped { reason, .. } => {
-                        self.status_message = Some(format!("Clean skipped: {}", reason));
-                    }
-                }
-            } else {
-                self.status_message = Some("No cleaner found for this resource".to_string());
-            }
+        if let Some(resource) = entry.system_resource {
+            let display_name = resource.display_name.clone();
+            self.start_operation(
+                OperationKind::Clean,
+                format!("Cleaning {}...", display_name),
+                move |cancel| clean_system_resource(resource, cancel),
+            );
             return;
         }
 
         // Handle regular project cleaning
         let path = entry.entry.path;
-
-        // Try to detect a project at this path
-        let registry = DetectorRegistry::new();
-
-        // Find a matching detector
-        let matching_detector = registry.detectors().iter().find(|d| d.detect(&path));
-
-        match matching_detector {
-            Some(detector) => {
-                // Find artifact paths and calculate size
-                let artifact_paths = detector.find_artifacts(&path);
-                if artifact_paths.is_empty() {
-                    self.status_message = Some("No artifacts to clean".to_string());
-                    return;
-                }
-
-                let artifact_size: u64 = artifact_paths.iter().map(|p| dir_size(p)).sum();
-
-                let project = DetectedProject {
-                    path: path.clone(),
-                    project_type: detector.id().to_string(),
-                    display_name: detector.display_name().to_string(),
-                    artifact_size,
-                    artifact_paths,
-                };
-
-                let clean_cmd = detector.clean_command();
-                let executor = CleanExecutor::new(CleanOptions::default());
-
-                match executor.clean(&project, clean_cmd) {
-                    CleanResult::Success { freed_bytes, .. } => {
-                        let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
-                        self.status_message = Some(format!(
-                            "Cleaned {} project, freed {}",
-                            project.display_name, freed_str
-                        ));
-                        self.trigger_rescan();
-                    }
-                    CleanResult::Failed {
-                        error, freed_bytes, ..
-                    } => {
-                        if freed_bytes > 0 {
-                            let freed_str = humansize::format_size(freed_bytes, humansize::BINARY);
-                            self.status_message = Some(format!(
-                                "Project partially cleaned, freed {} before failure: {}",
-                                freed_str, error
-                            ));
-                            self.trigger_rescan();
-                        } else {
-                            self.status_message = Some(format!("Clean failed: {}", error));
-                        }
-                    }
-                    CleanResult::Skipped { reason, .. } => {
-                        self.status_message = Some(format!("Clean skipped: {}", reason));
-                    }
-                }
-            }
-            None => {
-                self.status_message = Some("Not a recognized project".to_string());
-            }
-        }
+        self.start_operation(
+            OperationKind::Clean,
+            format!("Cleaning {}...", path.display()),
+            move |cancel| clean_project(path, cancel),
+        );
     }
 
     /// Check if the selected entry is a cleanable project or system resource.
@@ -955,6 +1180,18 @@ mod tests {
         root.recalculate_totals();
 
         root
+    }
+
+    fn wait_for_operation(app: &mut App) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.operation_kind().is_some() && std::time::Instant::now() < deadline {
+            app.poll_operation_result();
+            std::thread::yield_now();
+        }
+        assert!(
+            app.operation_kind().is_none(),
+            "background operation timed out"
+        );
     }
 
     #[test]
@@ -1264,12 +1501,55 @@ mod tests {
         assert!(app.status_message.as_ref().unwrap().contains("No entry"));
     }
 
+    #[test]
+    fn test_delete_selected_runs_as_background_operation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("delete-me.txt");
+        fs::write(&file_path, "test").unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.initial_scan();
+        app.selected = app
+            .visible_entries
+            .iter()
+            .position(|entry| entry.entry.path == file_path)
+            .unwrap();
+
+        app.delete_selected();
+        assert_eq!(app.operation_kind(), Some(OperationKind::Delete));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.operation_kind().is_some() && std::time::Instant::now() < deadline {
+            app.poll_operation_result();
+            std::thread::yield_now();
+        }
+
+        assert_eq!(app.operation_kind(), None);
+        assert!(!file_path.exists());
+        assert!(
+            app.scanning,
+            "successful deletion should start an async rescan"
+        );
+    }
+
+    #[test]
+    fn test_system_detection_starts_in_background() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.detect_system = true;
+
+        app.start_background_scan();
+
+        assert!(app.system_detection_running);
+    }
+
     // Clean tests
 
     #[test]
     fn test_clean_selected_no_entry() {
         let mut app = App::new(PathBuf::from("/"));
         app.clean_selected();
+        wait_for_operation(&mut app);
         assert!(app.status_message.is_some());
         assert!(app.status_message.as_ref().unwrap().contains("No entry"));
     }
@@ -1284,6 +1564,7 @@ mod tests {
         app.rebuild_visible_entries();
 
         app.clean_selected();
+        wait_for_operation(&mut app);
         assert!(app.status_message.is_some());
         assert!(app
             .status_message
@@ -1310,6 +1591,7 @@ mod tests {
 
         assert!(target_dir.exists());
         app.clean_selected();
+        wait_for_operation(&mut app);
 
         // Target should be removed (regardless of whether cargo clean or direct deletion was used)
         assert!(!target_dir.exists());
@@ -1337,6 +1619,7 @@ mod tests {
         app.rebuild_visible_entries();
 
         app.clean_selected();
+        wait_for_operation(&mut app);
         assert!(app.status_message.is_some());
         assert!(app
             .status_message

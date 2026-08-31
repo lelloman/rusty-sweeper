@@ -39,7 +39,7 @@ pub fn run(root: PathBuf) -> anyhow::Result<()> {
             // Main loop
             while !app.should_quit {
                 // Poll for scan results from background thread
-                app.poll_scan_result();
+                app.poll_background_work();
 
                 // Render
                 terminal.draw(|frame| render(&app, frame))?;

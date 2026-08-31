@@ -111,7 +111,8 @@ large_dir_threshold = 1073741824
 | `.` | Toggle hidden files |
 | `r` | Rescan |
 | `?` | Help |
-| `q` / `Esc` | Quit |
+| `Esc` | Cancel active work, otherwise quit |
+| `q` | Quit |
 
 ## Cleanup Support
 

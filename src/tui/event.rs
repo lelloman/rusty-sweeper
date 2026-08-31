@@ -27,6 +27,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    if app.mode == Mode::Normal && key.code == KeyCode::Esc {
+        if app.operation_kind().is_some() {
+            app.cancel_operation();
+            return;
+        }
+        if app.scanning {
+            app.cancel_scan();
+            app.status_message = Some("Scan cancelled".to_string());
+            return;
+        }
+    }
+
     // Mode-specific handling
     match app.mode {
         Mode::Normal => handle_normal_mode(app, key),
@@ -360,5 +372,16 @@ mod tests {
         app.mode = Mode::Confirm(ConfirmAction::Delete);
         handle_key_event(&mut app, ctrl_c);
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_escape_cancels_background_scan_before_quitting() {
+        let mut app = App::new(PathBuf::from("/"));
+        app.scanning = true;
+
+        handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!app.scanning);
+        assert!(!app.should_quit);
     }
 }

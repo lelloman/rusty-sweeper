@@ -20,6 +20,19 @@ fn key_char(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
 }
 
+fn wait_for_background_work(app: &mut App) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while (app.operation_kind().is_some() || app.scanning) && std::time::Instant::now() < deadline {
+        app.poll_background_work();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(
+        app.operation_kind().is_none(),
+        "background operation timed out"
+    );
+    assert!(!app.scanning, "background rescan timed out");
+}
+
 #[test]
 fn test_tui_initial_scan() {
     let temp = tempdir().unwrap();
@@ -242,6 +255,7 @@ fn test_tui_delete_confirmation() {
 
     // Confirm with y
     handle_key_event(&mut app, key_char('y'));
+    wait_for_background_work(&mut app);
 
     // File should be deleted
     assert!(!file_path.exists());
@@ -291,6 +305,7 @@ fn test_tui_delete_confirmation_pins_original_target() {
     // selection points at while the dialog remains open.
     app.selected = 2;
     handle_key_event(&mut app, key_char('y'));
+    wait_for_background_work(&mut app);
 
     assert!(
         !first_path.exists(),
@@ -323,6 +338,7 @@ fn test_tui_clean_confirmation_pins_original_target() {
 
     app.selected = 2;
     handle_key_event(&mut app, key_char('y'));
+    wait_for_background_work(&mut app);
 
     assert!(!first_project.join("target").exists());
     assert!(second_project.join("target").exists());
@@ -348,6 +364,7 @@ fn test_tui_partial_clean_reports_freed_space_and_refreshes_tree() {
         .any(|entry| entry.entry.path == build));
 
     app.clean_selected();
+    wait_for_background_work(&mut app);
 
     assert!(!build.exists());
     assert!(
