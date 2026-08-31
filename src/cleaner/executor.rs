@@ -73,11 +73,13 @@ impl CleanExecutor {
         // Try native command first if available and enabled
         if self.options.use_native_commands {
             if let Some(cmd) = clean_command {
+                let size_before = Self::artifact_size(&project.artifact_paths);
                 match self.run_clean_command(&project.path, cmd) {
                     Ok(()) => {
+                        let size_after = Self::artifact_size(&project.artifact_paths);
                         return CleanResult::Success {
                             project: project.clone(),
-                            freed_bytes: project.artifact_size,
+                            freed_bytes: size_before.saturating_sub(size_after),
                         };
                     }
                     Err(e) => {
@@ -150,6 +152,10 @@ impl CleanExecutor {
             .filter_map(|e| e.metadata().ok())
             .map(|m| m.len())
             .sum()
+    }
+
+    fn artifact_size(paths: &[std::path::PathBuf]) -> u64 {
+        paths.iter().map(|path| Self::dir_size(path)).sum()
     }
 }
 
@@ -335,6 +341,23 @@ mod tests {
                 freed_bytes: 100,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn test_native_clean_reports_measured_bytes_freed() {
+        let (_tmp, project) = create_test_project();
+        let executor = CleanExecutor::new(CleanOptions {
+            dry_run: false,
+            use_native_commands: true,
+        });
+
+        let result = executor.clean(&project, Some("true"));
+
+        assert!(project.artifact_paths[0].exists());
+        assert!(matches!(
+            result,
+            CleanResult::Success { freed_bytes: 0, .. }
         ));
     }
 }
