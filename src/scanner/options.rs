@@ -27,10 +27,10 @@ pub const LINUX_VIRTUAL_FS_PATHS: &[&str] = &["/proc", "/dev", "/sys", "/run"];
 impl ScanOptions {
     /// Check if a path should be excluded based on Linux virtual filesystem paths
     pub fn is_linux_virtual_fs(path: &std::path::Path) -> bool {
-        let path_str = path.to_string_lossy();
         LINUX_VIRTUAL_FS_PATHS
             .iter()
-            .any(|vfs| path_str.starts_with(vfs) || path_str.as_ref() == *vfs)
+            .map(std::path::Path::new)
+            .any(|virtual_root| path == virtual_root || path.starts_with(virtual_root))
     }
 
     /// Create a new ScanOptions with default values
@@ -166,5 +166,12 @@ mod tests {
         assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/tmp")));
         assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/var/log")));
         assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/usr/bin")));
+
+        // Similar string prefixes are ordinary directory names, not virtual
+        // filesystem descendants.
+        assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/procurement")));
+        assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/development")));
+        assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/system")));
+        assert!(!ScanOptions::is_linux_virtual_fs(Path::new("/runner")));
     }
 }
