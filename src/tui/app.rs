@@ -471,7 +471,9 @@ impl App {
 
         // Spawn background thread for progressive scanning
         let handle = thread::spawn(move || {
-            let options = ScanOptions::default().with_hidden(true);
+            let options = ScanOptions::default()
+                .with_hidden(true)
+                .with_one_file_system(true);
             scan_directory_progressive(&root, &options, tx);
         });
 
@@ -535,7 +537,9 @@ impl App {
         self.detect_system_resources();
 
         // Always scan with hidden files included so we can toggle visibility in the UI
-        let options = ScanOptions::default().with_hidden(true);
+        let options = ScanOptions::default()
+            .with_hidden(true)
+            .with_one_file_system(true);
         match scan_directory(&self.root, &options) {
             Ok(tree) => {
                 // Preserve expanded paths that still exist

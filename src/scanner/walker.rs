@@ -55,6 +55,12 @@ pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
         walker = walker.max_depth(depth);
     }
 
+    // Prune excluded trees before descent. Filtering only after WalkDir yields
+    // an entry still causes it to traverse the directory's descendants.
+    let walker = walker
+        .into_iter()
+        .filter_entry(|entry| should_visit_path(entry.path(), &root, options, root_dev));
+
     // Collect all entries, building a path -> entry map
     let mut entries: HashMap<PathBuf, DirEntry> = HashMap::new();
 
@@ -122,6 +128,90 @@ pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
     build_tree(&root, entries)
 }
 
+fn should_visit_path(
+    path: &Path,
+    root: &Path,
+    options: &ScanOptions,
+    root_dev: Option<u64>,
+) -> bool {
+    if path == root {
+        return true;
+    }
+
+    if ScanOptions::is_linux_virtual_fs(path) {
+        return false;
+    }
+
+    if !options.include_hidden
+        && path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+    {
+        return false;
+    }
+
+    if matches_exclusion(path, root, &options.exclude_patterns) {
+        return false;
+    }
+
+    if let Some(root_dev) = root_dev {
+        if fs::metadata(path).is_ok_and(|metadata| metadata.dev() != root_dev) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn matches_exclusion(path: &Path, root: &Path, patterns: &[String]) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let relative_text = relative.to_string_lossy();
+
+    patterns.iter().any(|pattern| {
+        let pattern = pattern.trim_start_matches("./");
+        if let Some(component_pattern) = pattern.strip_prefix("**/") {
+            relative.components().any(|component| {
+                component
+                    .as_os_str()
+                    .to_str()
+                    .is_some_and(|name| wildcard_matches(component_pattern, name))
+            })
+        } else if pattern.contains('/') {
+            wildcard_matches(pattern, &relative_text)
+        } else {
+            relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| wildcard_matches(pattern, name))
+        }
+    })
+}
+
+/// Match the `*` and `?` forms needed by scanner exclusion patterns.
+fn wildcard_matches(pattern: &str, value: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let value: Vec<char> = value.chars().collect();
+    let mut previous = vec![false; value.len() + 1];
+    previous[0] = true;
+
+    for token in pattern {
+        let mut current = vec![false; value.len() + 1];
+        if token == '*' {
+            current[0] = previous[0];
+        }
+        for (index, character) in value.iter().enumerate() {
+            current[index + 1] = match token {
+                '*' => previous[index + 1] || current[index],
+                '?' => previous[index],
+                literal => previous[index] && literal == *character,
+            };
+        }
+        previous = current;
+    }
+
+    previous[value.len()]
+}
+
 /// Build a tree structure from a flat HashMap of entries
 fn build_tree(root: &Path, mut entries: HashMap<PathBuf, DirEntry>) -> Result<DirEntry> {
     // Sort paths by depth (deepest first) so we process children before parents
@@ -173,13 +263,28 @@ pub fn scan_directory_parallel(root: &Path, options: &ScanOptions) -> Result<Dir
         source: e,
     })?;
 
-    scan_dir_recursive_parallel(&root, options, 0)
+    let root_dev = if options.one_file_system {
+        Some(
+            fs::metadata(&root)
+                .map_err(|e| SweeperError::Io {
+                    path: root.clone(),
+                    source: e,
+                })?
+                .dev(),
+        )
+    } else {
+        None
+    };
+
+    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev)
 }
 
 fn scan_dir_recursive_parallel(
     path: &Path,
+    root: &Path,
     options: &ScanOptions,
     depth: usize,
+    root_dev: Option<u64>,
 ) -> Result<DirEntry> {
     use rayon::prelude::*;
 
@@ -244,22 +349,7 @@ fn scan_dir_recursive_parallel(
 
     let entries: Vec<_> = read_dir
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            let child_path = e.path();
-            // Filter out Linux virtual filesystem paths
-            if ScanOptions::is_linux_virtual_fs(&child_path) {
-                return false;
-            }
-            // Filter hidden files if needed
-            if !options.include_hidden {
-                if let Some(name) = child_path.file_name() {
-                    if name.to_string_lossy().starts_with('.') {
-                        return false;
-                    }
-                }
-            }
-            true
-        })
+        .filter(|e| should_visit_path(&e.path(), root, options, root_dev))
         .collect();
 
     // Process entries in parallel
@@ -267,7 +357,7 @@ fn scan_dir_recursive_parallel(
         .par_iter()
         .filter_map(|entry| {
             let child_path = entry.path();
-            scan_dir_recursive_parallel(&child_path, options, depth + 1).ok()
+            scan_dir_recursive_parallel(&child_path, root, options, depth + 1, root_dev).ok()
         })
         .collect();
 
@@ -305,6 +395,12 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         }
     };
 
+    let root_dev = if options.one_file_system {
+        Some(metadata.dev())
+    } else {
+        None
+    };
+
     // Read top-level directory entries
     let read_dir = match fs::read_dir(&root) {
         Ok(rd) => rd,
@@ -319,20 +415,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     // Collect top-level entries to process
     let entries: Vec<_> = read_dir
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            if ScanOptions::is_linux_virtual_fs(&path) {
-                return false;
-            }
-            if !options.include_hidden {
-                if let Some(name) = path.file_name() {
-                    if name.to_string_lossy().starts_with('.') {
-                        return false;
-                    }
-                }
-            }
-            true
-        })
+        .filter(|e| should_visit_path(&e.path(), &root, options, root_dev))
         .collect();
 
     let total = entries.len();
@@ -353,10 +436,11 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         });
 
         // Scan this entry (parallel internally via scan_dir_recursive_parallel)
-        let child_entry = match scan_dir_recursive_parallel(&child_path, options, 1) {
-            Ok(e) => e,
-            Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
-        };
+        let child_entry =
+            match scan_dir_recursive_parallel(&child_path, &root, options, 1, root_dev) {
+                Ok(e) => e,
+                Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
+            };
         children.push(child_entry);
     }
 
@@ -448,6 +532,37 @@ mod tests {
 
         let has_hidden = result.children.iter().any(|c| c.name == ".hidden");
         assert!(has_hidden);
+    }
+
+    #[test]
+    fn test_scanners_prune_configured_excluded_subtree() {
+        let dir = TempDir::new().unwrap();
+        let excluded = dir.path().join("excluded");
+        fs::create_dir(&excluded).unwrap();
+        File::create(excluded.join("large.bin"))
+            .unwrap()
+            .write_all(&[b'x'; 100])
+            .unwrap();
+        File::create(dir.path().join("visible.txt"))
+            .unwrap()
+            .write_all(b"visible")
+            .unwrap();
+
+        let options = ScanOptions::new().with_exclude(vec!["excluded".to_string()]);
+
+        for result in [
+            scan_directory(dir.path(), &options).unwrap(),
+            scan_directory_parallel(dir.path(), &options).unwrap(),
+        ] {
+            assert!(result
+                .children
+                .iter()
+                .any(|entry| entry.name == "visible.txt"));
+            assert!(
+                !result.children.iter().any(|entry| entry.name == "excluded"),
+                "excluded subtree must not be returned"
+            );
+        }
     }
 
     #[test]
