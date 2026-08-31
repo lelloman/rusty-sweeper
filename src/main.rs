@@ -17,9 +17,14 @@ fn main() -> Result<()> {
     tracing::debug!(?config, "Loaded configuration");
 
     let root = starting_path(cli.path)?;
-    let scan_options = ScanOptions::default()
+    let mut scan_options = ScanOptions::default()
         .with_threads(config.scanner.parallel_threads)
         .with_one_file_system(!config.scanner.cross_filesystems);
+    if config.scanner.use_cache {
+        if let Some(cache_path) = ScanOptions::default_cache_path() {
+            scan_options = scan_options.with_cache(cache_path, config.scanner.cache_ttl);
+        }
+    }
     tracing::info!(path = %root.display(), "Starting TUI");
     rusty_sweeper::tui::run_with_scan_options(root, scan_options)?;
 

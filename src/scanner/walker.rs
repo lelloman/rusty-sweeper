@@ -8,9 +8,9 @@ use walkdir::WalkDir;
 
 use crate::error::{Result, SweeperError};
 
+use super::cache::{MetadataCache, ScanCacheStats};
 use super::entry::DirEntry;
 use super::options::ScanOptions;
-use super::size::{apparent_size, disk_usage};
 
 /// Update sent during progressive scan.
 #[derive(Debug, Clone)]
@@ -31,6 +31,25 @@ pub enum ScanUpdate {
 
 /// Scan a directory and return a tree of DirEntry
 pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
+    scan_directory_with_cache_stats(root, options).map(|(tree, _)| tree)
+}
+
+fn scan_directory_with_cache_stats(
+    root: &Path,
+    options: &ScanOptions,
+) -> Result<(DirEntry, ScanCacheStats)> {
+    let cache = MetadataCache::load(options.cache.as_ref());
+    let tree = scan_directory_inner(root, options, &cache)?;
+    let stats = cache.stats();
+    cache.save();
+    Ok((tree, stats))
+}
+
+fn scan_directory_inner(
+    root: &Path,
+    options: &ScanOptions,
+    cache: &MetadataCache,
+) -> Result<DirEntry> {
     let root = root.canonicalize().map_err(|e| SweeperError::Io {
         path: root.to_path_buf(),
         source: e,
@@ -117,10 +136,11 @@ pub fn scan_directory(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
         let dir_entry = if metadata.is_dir() {
             DirEntry::new_dir(path.clone(), metadata.modified().ok())
         } else {
+            let (apparent_size, disk_usage) = cache.sizes(&path, &metadata);
             DirEntry::new_file(
                 path.clone(),
-                apparent_size(&metadata),
-                disk_usage(&metadata),
+                apparent_size,
+                disk_usage,
                 metadata.modified().ok(),
             )
         };
@@ -262,10 +282,15 @@ fn recalculate_totals_recursive(entry: &mut DirEntry) {
 
 /// Parallel directory scanner for better performance on large directories
 pub fn scan_directory_parallel(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
-    match configured_thread_pool(options)? {
-        Some(pool) => pool.install(|| scan_directory_parallel_inner(root, options)),
-        None => scan_directory_parallel_inner(root, options),
+    let cache = MetadataCache::load(options.cache.as_ref());
+    let result = match configured_thread_pool(options)? {
+        Some(pool) => pool.install(|| scan_directory_parallel_inner(root, options, &cache)),
+        None => scan_directory_parallel_inner(root, options, &cache),
+    };
+    if result.is_ok() {
+        cache.save();
     }
+    result
 }
 
 fn configured_thread_pool(options: &ScanOptions) -> Result<Option<rayon::ThreadPool>> {
@@ -280,7 +305,11 @@ fn configured_thread_pool(options: &ScanOptions) -> Result<Option<rayon::ThreadP
         .map_err(|error| SweeperError::Other(format!("Cannot create scanner thread pool: {error}")))
 }
 
-fn scan_directory_parallel_inner(root: &Path, options: &ScanOptions) -> Result<DirEntry> {
+fn scan_directory_parallel_inner(
+    root: &Path,
+    options: &ScanOptions,
+    cache: &MetadataCache,
+) -> Result<DirEntry> {
     let root = root.canonicalize().map_err(|e| SweeperError::Io {
         path: root.to_path_buf(),
         source: e,
@@ -300,7 +329,7 @@ fn scan_directory_parallel_inner(root: &Path, options: &ScanOptions) -> Result<D
     };
 
     let visited_dirs = Arc::new(Mutex::new(HashSet::new()));
-    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev, &visited_dirs)
+    scan_dir_recursive_parallel(&root, &root, options, 0, root_dev, &visited_dirs, cache)
 }
 
 fn scan_dir_recursive_parallel(
@@ -310,6 +339,7 @@ fn scan_dir_recursive_parallel(
     depth: usize,
     root_dev: Option<u64>,
     visited_dirs: &Arc<Mutex<HashSet<(u64, u64)>>>,
+    cache: &MetadataCache,
 ) -> Result<DirEntry> {
     use rayon::prelude::*;
 
@@ -348,10 +378,11 @@ fn scan_dir_recursive_parallel(
 
     // If it's a file, return immediately
     if !metadata.is_dir() {
+        let (apparent_size, disk_usage) = cache.sizes(path, &metadata);
         return Ok(DirEntry::new_file(
             path.to_path_buf(),
-            apparent_size(&metadata),
-            disk_usage(&metadata),
+            apparent_size,
+            disk_usage,
             metadata.modified().ok(),
         ));
     }
@@ -401,6 +432,7 @@ fn scan_dir_recursive_parallel(
                 depth + 1,
                 root_dev,
                 visited_dirs,
+                cache,
             )
             .ok()
         })
@@ -420,6 +452,7 @@ fn scan_dir_recursive_parallel(
 /// Scans top-level entries sequentially, sending a tree update after each completes.
 /// Each individual entry is scanned in parallel internally for speed.
 pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender<ScanUpdate>) {
+    let cache = MetadataCache::load(options.cache.as_ref());
     let thread_pool = match configured_thread_pool(options) {
         Ok(pool) => pool,
         Err(error) => {
@@ -498,8 +531,17 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         let child_path = entry.path();
 
         // Scan this entry (parallel internally via scan_dir_recursive_parallel)
-        let scan_child =
-            || scan_dir_recursive_parallel(&child_path, &root, options, 1, root_dev, &visited_dirs);
+        let scan_child = || {
+            scan_dir_recursive_parallel(
+                &child_path,
+                &root,
+                options,
+                1,
+                root_dev,
+                &visited_dirs,
+                &cache,
+            )
+        };
         let child_result = match &thread_pool {
             Some(pool) => pool.install(scan_child),
             None => scan_child(),
@@ -520,6 +562,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         }
     }
 
+    cache.save();
     let _ = tx.send(ScanUpdate::Complete);
 }
 
@@ -730,6 +773,30 @@ mod tests {
         // Subdir should also have combined size
         let subdir = result.children.iter().find(|c| c.name == "subdir").unwrap();
         assert_eq!(subdir.size, 300);
+    }
+
+    #[test]
+    fn test_scan_cache_reuses_unchanged_file_metadata() {
+        let dir = TempDir::new().unwrap();
+        let cache_dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("data.bin"), vec![b'x'; 128]).unwrap();
+        let cache_path = cache_dir.path().join("scan-cache.json");
+        let options = ScanOptions::new().with_cache(cache_path, 3600);
+
+        let (_, first_stats) = scan_directory_with_cache_stats(dir.path(), &options).unwrap();
+        assert_eq!(first_stats.hits, 0);
+        assert_eq!(first_stats.misses, 1);
+
+        let (tree, second_stats) = scan_directory_with_cache_stats(dir.path(), &options).unwrap();
+        assert_eq!(tree.size, 128);
+        assert_eq!(second_stats.hits, 1);
+        assert_eq!(second_stats.misses, 0);
+
+        fs::write(dir.path().join("data.bin"), vec![b'y'; 256]).unwrap();
+        let (tree, changed_stats) = scan_directory_with_cache_stats(dir.path(), &options).unwrap();
+        assert_eq!(tree.size, 256);
+        assert_eq!(changed_stats.hits, 0);
+        assert_eq!(changed_stats.misses, 1);
     }
 
     #[test]

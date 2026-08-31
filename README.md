@@ -68,6 +68,8 @@ Configuration file: `~/.config/rusty-sweeper/config.toml`
 
 The file is currently loaded and validated on startup, but behavior is not yet fully driven by these values. Treat it as partially implemented.
 
+Scanner parallelism, filesystem-boundary behavior, and the persistent metadata cache are active. Cached files are validated by device/inode, size, allocated blocks, and nanosecond modification/change times before their accounting is reused.
+
 ```toml
 [scanner]
 parallel_threads = 0  # 0 = auto

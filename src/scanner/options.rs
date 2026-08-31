@@ -1,3 +1,13 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
+/// Persistent metadata-cache configuration.
+#[derive(Debug, Clone)]
+pub struct ScanCacheOptions {
+    pub path: PathBuf,
+    pub ttl: Duration,
+}
+
 /// Configuration options for directory scanning operations.
 #[derive(Debug, Clone, Default)]
 pub struct ScanOptions {
@@ -18,6 +28,9 @@ pub struct ScanOptions {
 
     /// Follow symbolic links
     pub follow_symlinks: bool,
+
+    /// Optional persistent file-metadata cache.
+    pub cache: Option<ScanCacheOptions>,
 }
 
 /// Linux virtual filesystem paths that should be excluded by default.
@@ -72,6 +85,20 @@ impl ScanOptions {
     pub fn with_follow_symlinks(mut self, follow: bool) -> Self {
         self.follow_symlinks = follow;
         self
+    }
+
+    /// Enable persistent metadata caching at `path`.
+    pub fn with_cache(mut self, path: PathBuf, ttl_seconds: u64) -> Self {
+        self.cache = Some(ScanCacheOptions {
+            path,
+            ttl: Duration::from_secs(ttl_seconds),
+        });
+        self
+    }
+
+    /// Default per-user cache location.
+    pub fn default_cache_path() -> Option<PathBuf> {
+        dirs::cache_dir().map(|directory| directory.join("rusty-sweeper/scan-metadata.json"))
     }
 }
 
