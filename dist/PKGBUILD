@@ -27,8 +27,10 @@ check() {
 package() {
     cd "$pkgname-$pkgver"
 
-    # Binary
+    # Binaries
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+    install -Dm755 "target/release/rusty-sweeper-monitor" \
+        "$pkgdir/usr/bin/rusty-sweeper-monitor"
 
     # Man page
     install -Dm644 "dist/man/$pkgname.1" "$pkgdir/usr/share/man/man1/$pkgname.1"

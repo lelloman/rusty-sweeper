@@ -15,8 +15,16 @@ fi
 # Create directory if needed
 mkdir -p "$USER_SERVICE_DIR"
 
-# Copy service file
-cp "$SCRIPT_DIR/$SERVICE_FILE" "$USER_SERVICE_DIR/"
+# Resolve the source-installed monitor (normally under ~/.cargo/bin) and
+# specialize the packaged unit template for this user's installation.
+MONITOR_BIN="$(command -v rusty-sweeper-monitor || true)"
+if [ -z "$MONITOR_BIN" ]; then
+    echo "Error: rusty-sweeper-monitor is not installed or not in PATH"
+    exit 1
+fi
+
+sed "s|^ExecStart=.*|ExecStart=$MONITOR_BIN|" \
+    "$SCRIPT_DIR/$SERVICE_FILE" > "$USER_SERVICE_DIR/$SERVICE_FILE"
 echo "Installed $SERVICE_FILE to $USER_SERVICE_DIR/"
 
 # Reload systemd
