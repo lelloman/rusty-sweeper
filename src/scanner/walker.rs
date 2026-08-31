@@ -15,13 +15,16 @@ use super::size::{apparent_size, disk_usage};
 /// Update sent during progressive scan.
 #[derive(Debug, Clone)]
 pub enum ScanUpdate {
-    /// Partial tree with current progress. `scanning` is the name of the entry being scanned.
-    Progress {
-        tree: DirEntry,
-        scanning: Option<String>,
+    /// Scan initialized with a lightweight root entry.
+    Started { root: DirEntry, total: usize },
+    /// A completed top-level entry to merge into the tree.
+    Entry {
+        entry: DirEntry,
+        completed: usize,
+        total: usize,
     },
     /// Scan finished successfully.
-    Complete { tree: DirEntry },
+    Complete,
     /// Error occurred during scan.
     Error { message: String },
 }
@@ -450,21 +453,20 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
         .collect();
 
     let total = entries.len();
-    let mut children: Vec<DirEntry> = Vec::new();
+    let root_entry = DirEntry::new_dir(root.clone(), metadata.modified().ok());
+    if tx
+        .send(ScanUpdate::Started {
+            root: root_entry,
+            total,
+        })
+        .is_err()
+    {
+        return;
+    }
 
     // Process each top-level entry sequentially, but each entry scans in parallel internally
     for (idx, entry) in entries.into_iter().enumerate() {
         let child_path = entry.path();
-        let entry_name = child_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        // Send "scanning" status before we start
-        let _ = tx.send(ScanUpdate::Progress {
-            tree: build_partial_tree(&root, &metadata, &children),
-            scanning: Some(format!("({}/{}) {}", idx + 1, total, entry_name)),
-        });
 
         // Scan this entry (parallel internally via scan_dir_recursive_parallel)
         let child_entry = match scan_dir_recursive_parallel(
@@ -478,25 +480,19 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
             Ok(e) => e,
             Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
         };
-        children.push(child_entry);
+        if tx
+            .send(ScanUpdate::Entry {
+                entry: child_entry,
+                completed: idx + 1,
+                total,
+            })
+            .is_err()
+        {
+            return;
+        }
     }
 
-    // Build final tree
-    let tree = build_partial_tree(&root, &metadata, &children);
-    let _ = tx.send(ScanUpdate::Complete { tree });
-}
-
-/// Helper to build a partial tree from accumulated children.
-fn build_partial_tree(
-    root: &Path,
-    metadata: &std::fs::Metadata,
-    children: &[DirEntry],
-) -> DirEntry {
-    let mut tree = DirEntry::new_dir(root.to_path_buf(), metadata.modified().ok());
-    tree.children = children.to_vec();
-    tree.recalculate_totals();
-    tree.sort_by_size();
-    tree
+    let _ = tx.send(ScanUpdate::Complete);
 }
 
 #[cfg(test)]
@@ -706,6 +702,36 @@ mod tests {
         // Subdir should also have combined size
         let subdir = result.children.iter().find(|c| c.name == "subdir").unwrap();
         assert_eq!(subdir.size, 300);
+    }
+
+    #[test]
+    fn test_progressive_scan_sends_each_entry_as_a_delta() {
+        let dir = create_test_structure();
+        let expected_entries = fs::read_dir(dir.path()).unwrap().count();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        scan_directory_progressive(dir.path(), &ScanOptions::new().with_hidden(true), tx);
+
+        let updates: Vec<_> = rx.into_iter().collect();
+        assert!(matches!(updates.first(), Some(ScanUpdate::Started { .. })));
+        assert!(matches!(updates.last(), Some(ScanUpdate::Complete)));
+
+        let deltas: Vec<_> = updates
+            .iter()
+            .filter_map(|update| match update {
+                ScanUpdate::Entry { entry, .. } => Some(entry),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas.len(), expected_entries);
+        assert_eq!(
+            deltas
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect::<HashSet<_>>()
+                .len(),
+            expected_entries
+        );
     }
 
     // Parallel scanner tests

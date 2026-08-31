@@ -494,14 +494,27 @@ impl App {
 
         if let Some(scan_update) = update {
             match scan_update {
-                ScanUpdate::Progress { tree, scanning } => {
-                    self.tree = Some(tree);
+                ScanUpdate::Started { root, total } => {
+                    self.tree = Some(root);
                     self.rebuild_visible_entries();
-                    if let Some(name) = scanning {
-                        self.status_message = Some(format!("Scanning: {}", name));
-                    }
+                    self.status_message = Some(format!("Scanning 0/{}", total));
                 }
-                ScanUpdate::Complete { tree } => {
+                ScanUpdate::Entry {
+                    entry,
+                    completed,
+                    total,
+                } => {
+                    let name = entry.name.clone();
+                    if let Some(tree) = &mut self.tree {
+                        tree.children.push(entry);
+                        tree.recalculate_totals();
+                        tree.sort_by_size();
+                    }
+                    self.rebuild_visible_entries();
+                    self.status_message =
+                        Some(format!("Scanning ({}/{}) {}", completed, total, name));
+                }
+                ScanUpdate::Complete => {
                     self.scanning = false;
                     self.scan_receiver = None;
                     self.scan_thread = None;
@@ -515,7 +528,6 @@ impl App {
                         }
                     }
 
-                    self.tree = Some(tree);
                     self.rebuild_visible_entries();
                     self.status_message = None; // Clear to show keybinding hints
                 }
