@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use nix::sys::statvfs::statvfs;
 
 use super::types::DiskStatus;
-use crate::error::Result;
+use crate::error::{Result, SweeperError};
 
 /// Check disk usage for a specific path
 pub fn check_disk_usage(path: &Path) -> Result<DiskStatus> {
@@ -161,14 +161,23 @@ pub fn check_all_mount_points() -> Result<Vec<DiskStatus>> {
 /// Check specific mount points
 pub fn check_mount_points(paths: &[PathBuf]) -> Result<Vec<DiskStatus>> {
     let mut results = Vec::new();
+    let mut failures = Vec::new();
 
     for path in paths {
         match check_disk_usage(path) {
             Ok(status) => results.push(status),
             Err(e) => {
                 tracing::warn!("Failed to check mount point {}: {}", path.display(), e);
+                failures.push(format!("{}: {}", path.display(), e));
             }
         }
+    }
+
+    if !failures.is_empty() {
+        return Err(SweeperError::Other(format!(
+            "Failed to check requested mount point(s): {}",
+            failures.join("; ")
+        )));
     }
 
     Ok(results)
@@ -239,5 +248,11 @@ mod tests {
 
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].mount_point, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn test_check_mount_points_rejects_unreadable_explicit_path() {
+        let paths = vec![PathBuf::from("/definitely/not/a/rusty-sweeper-mount")];
+        assert!(check_mount_points(&paths).is_err());
     }
 }
