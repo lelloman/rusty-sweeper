@@ -81,12 +81,14 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             if let Some(entry) = app.selected_entry() {
                 // Don't allow delete on system resources or separators
                 if entry.system_resource.is_none() && !entry.is_separator {
+                    app.confirmation_target = Some(entry.clone());
                     app.mode = Mode::Confirm(ConfirmAction::Delete);
                 }
             }
         }
         KeyCode::Char('c') => {
             if app.selected_entry().is_some() && app.prepare_clean_preview() {
+                app.confirmation_target = app.selected_entry().cloned();
                 app.mode = Mode::Confirm(ConfirmAction::Clean);
             }
         }
@@ -155,9 +157,11 @@ fn handle_confirm_mode(app: &mut App, key: KeyEvent, action: ConfirmAction) {
                 ConfirmAction::Delete => app.delete_selected(),
                 ConfirmAction::Clean => app.clean_selected(),
             }
+            app.confirmation_target = None;
             app.mode = Mode::Normal;
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.confirmation_target = None;
             app.mode = Mode::Normal;
         }
         _ => {}

@@ -404,7 +404,9 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
     let (title, message, dialog_height) = match action {
         ConfirmAction::Delete => {
             let path = app
-                .selected_entry()
+                .confirmation_target
+                .as_ref()
+                .or_else(|| app.selected_entry())
                 .map(|e| {
                     let p = e.entry.path.display().to_string();
                     if p.len() > 35 {
@@ -415,7 +417,9 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                 })
                 .unwrap_or_default();
             let size = app
-                .selected_entry()
+                .confirmation_target
+                .as_ref()
+                .or_else(|| app.selected_entry())
                 .map(|e| humansize::format_size(e.entry.size, humansize::BINARY))
                 .unwrap_or_default();
             (
@@ -429,7 +433,9 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                 let total_str = humansize::format_size(preview.total_size, humansize::BINARY);
 
                 let is_system_resource = app
-                    .selected_entry()
+                    .confirmation_target
+                    .as_ref()
+                    .or_else(|| app.selected_entry())
                     .is_some_and(|e| e.system_resource.is_some());
 
                 // Build artifact list

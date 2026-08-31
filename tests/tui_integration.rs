@@ -272,6 +272,63 @@ fn test_tui_delete_cancel() {
 }
 
 #[test]
+fn test_tui_delete_confirmation_pins_original_target() {
+    let temp = tempdir().unwrap();
+    let first_path = temp.path().join("first.txt");
+    let second_path = temp.path().join("second.txt");
+    fs::write(&first_path, "first file is larger").unwrap();
+    fs::write(&second_path, "x").unwrap();
+
+    let mut app = App::new(temp.path().to_path_buf());
+    app.initial_scan();
+
+    // Size sorting puts first.txt before second.txt.
+    app.selected = 1;
+    handle_key_event(&mut app, key_char('d'));
+    assert!(matches!(app.mode, Mode::Confirm(ConfirmAction::Delete)));
+
+    // Simulate a progressive scan rebuild changing which row the numeric
+    // selection points at while the dialog remains open.
+    app.selected = 2;
+    handle_key_event(&mut app, key_char('y'));
+
+    assert!(
+        !first_path.exists(),
+        "the originally confirmed file must be deleted"
+    );
+    assert!(
+        second_path.exists(),
+        "a newly selected file must not be deleted"
+    );
+}
+
+#[test]
+fn test_tui_clean_confirmation_pins_original_target() {
+    let temp = tempdir().unwrap();
+    let first_project = temp.path().join("first-project");
+    let second_project = temp.path().join("second-project");
+    fs::create_dir_all(first_project.join("target")).unwrap();
+    fs::create_dir_all(second_project.join("target")).unwrap();
+    fs::write(first_project.join("Cargo.toml"), "[package]").unwrap();
+    fs::write(second_project.join("Cargo.toml"), "[package]").unwrap();
+    fs::write(first_project.join("target/artifact"), "x".repeat(20)).unwrap();
+    fs::write(second_project.join("target/artifact"), "x").unwrap();
+
+    let mut app = App::new(temp.path().to_path_buf());
+    app.initial_scan();
+
+    app.selected = 1;
+    handle_key_event(&mut app, key_char('c'));
+    assert!(matches!(app.mode, Mode::Confirm(ConfirmAction::Clean)));
+
+    app.selected = 2;
+    handle_key_event(&mut app, key_char('y'));
+
+    assert!(!first_project.join("target").exists());
+    assert!(second_project.join("target").exists());
+}
+
+#[test]
 fn test_tui_help_mode() {
     let mut app = App::new(PathBuf::from("/"));
 

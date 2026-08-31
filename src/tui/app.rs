@@ -166,6 +166,10 @@ pub struct App {
     /// Preview info for clean confirmation.
     pub clean_preview: Option<CleanPreview>,
 
+    /// Entry captured when a destructive confirmation dialog is opened.
+    /// This prevents background scan updates from changing the action target.
+    pub confirmation_target: Option<VisibleEntry>,
+
     /// Detected system-level resources (e.g., Docker build cache).
     pub system_resources: Vec<DetectedSystemResource>,
 
@@ -197,6 +201,7 @@ impl App {
             status_message: None,
             scanning: false,
             clean_preview: None,
+            confirmation_target: None,
             system_resources: Vec::new(),
             detect_system: false,
             scan_receiver: None,
@@ -207,6 +212,14 @@ impl App {
     /// Get the currently selected entry, if any.
     pub fn selected_entry(&self) -> Option<&VisibleEntry> {
         self.visible_entries.get(self.selected)
+    }
+
+    /// Get the entry targeted by the active confirmation, falling back to the
+    /// current selection for direct programmatic actions.
+    fn action_target(&self) -> Option<&VisibleEntry> {
+        self.confirmation_target
+            .as_ref()
+            .or_else(|| self.selected_entry())
     }
 
     /// Rebuild the visible_entries list from the tree based on expansion state.
@@ -560,7 +573,7 @@ impl App {
 
     /// Delete the selected entry.
     pub fn delete_selected(&mut self) {
-        let entry = match self.selected_entry() {
+        let entry = match self.action_target() {
             Some(entry) => entry.clone(),
             None => {
                 self.status_message = Some("No entry selected".to_string());
@@ -598,7 +611,7 @@ impl App {
 
     /// Clean the selected project or system resource.
     pub fn clean_selected(&mut self) {
-        let entry = match self.selected_entry() {
+        let entry = match self.action_target() {
             Some(entry) => entry.clone(),
             None => {
                 self.status_message = Some("No entry selected".to_string());
