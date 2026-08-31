@@ -103,15 +103,11 @@ impl ProjectScanner {
             if detector.detect(path) {
                 let artifact_paths = detector.find_artifacts(path);
 
-                // Only report if there are actual artifacts OR it's a command-only detector
+                // Keep recognized local projects even when currently clean so
+                // callers can distinguish them from ordinary directories.
                 let has_local_artifacts = !artifact_paths.is_empty();
                 let has_artifact_dirs = !detector.artifact_dirs().is_empty();
                 let has_clean_command = detector.clean_command().is_some();
-
-                // Skip if no artifacts to clean
-                if !has_local_artifacts && has_artifact_dirs {
-                    continue;
-                }
 
                 // Skip command-only detectors (like Go) unless explicitly enabled
                 if !has_local_artifacts && !has_artifact_dirs && has_clean_command {
@@ -298,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_skips_projects_without_artifacts() {
+    fn test_scan_reports_recognized_projects_without_artifacts() {
         let tmp = TempDir::new().unwrap();
 
         // Cargo project without target/
@@ -311,7 +307,10 @@ mod tests {
         let scanner = ProjectScanner::new(registry, ScanOptions::default());
 
         let projects = scanner.scan(tmp.path());
-        assert!(projects.is_empty()); // No artifacts to report
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].project_type, "cargo");
+        assert_eq!(projects[0].artifact_size, 0);
+        assert!(projects[0].artifact_paths.is_empty());
     }
 
     #[test]

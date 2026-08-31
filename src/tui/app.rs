@@ -11,8 +11,8 @@ use std::thread::{self, JoinHandle};
 use nix::sys::statvfs::statvfs;
 
 use crate::cleaner::{
-    CleanExecutor, CleanOptions, CleanResult, DetectedProject, DetectedSystemResource,
-    DetectorRegistry, SystemCleanerRegistry,
+    CleanOptions, CleanOrchestrator, CleanResult, DetectedProject, DetectedSystemResource,
+    DetectorRegistry, ProjectScanner, ScanOptions as ProjectScanOptions, SystemCleanerRegistry,
 };
 use crate::scanner::{
     scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate,
@@ -105,50 +105,28 @@ fn cancelled_outcome(action: &str) -> OperationOutcome {
     }
 }
 
-fn clean_project(path: PathBuf, cancel: Arc<AtomicBool>) -> OperationOutcome {
+fn clean_project(project: DetectedProject, cancel: Arc<AtomicBool>) -> OperationOutcome {
     if cancel.load(Ordering::Acquire) {
         return cancelled_outcome("Clean");
     }
 
-    let registry = DetectorRegistry::new();
-    let Some(detector) = registry
-        .detectors()
-        .iter()
-        .find(|detector| detector.detect(&path))
-    else {
-        return OperationOutcome {
-            message: "Not a recognized project".to_string(),
-            rescan: false,
-            refresh_system_resources: false,
-        };
-    };
-
-    let artifact_paths = detector.find_artifacts(&path);
-    if artifact_paths.is_empty() {
+    if project.artifact_paths.is_empty() {
         return OperationOutcome {
             message: "No artifacts to clean".to_string(),
             rescan: false,
             refresh_system_resources: false,
         };
     }
-    let artifact_size = artifact_paths
-        .iter()
-        .map(|artifact| dir_size(artifact))
-        .sum();
-    let project = DetectedProject {
-        path,
-        project_type: detector.id().to_string(),
-        display_name: detector.display_name().to_string(),
-        artifact_size,
-        artifact_paths,
-    };
-    let clean_command = detector.clean_command();
-
     if cancel.load(Ordering::Acquire) {
         return cancelled_outcome("Clean");
     }
 
-    match CleanExecutor::new(CleanOptions::default()).clean(&project, clean_command) {
+    let orchestrator = CleanOrchestrator::new(DetectorRegistry::new(), CleanOptions::default(), 1);
+    let mut results = orchestrator.clean_all(vec![project.clone()], None);
+    match results
+        .pop()
+        .expect("one project produces one clean result")
+    {
         CleanResult::Success { freed_bytes, .. } => OperationOutcome {
             message: format!(
                 "Cleaned {} project, freed {}",
@@ -234,31 +212,6 @@ fn dir_size(path: &Path) -> u64 {
         .sum()
 }
 
-/// Detect project type at the given path.
-/// Returns the short display name (e.g., "Rust", "Node") if detected.
-fn detect_project_type(registry: &DetectorRegistry, path: &Path) -> Option<String> {
-    for detector in registry.detectors() {
-        if detector.detect(path) {
-            // Extract short name from display_name (e.g., "Rust/Cargo" -> "Rust")
-            let display_name = detector.display_name();
-            let short_name = display_name.split('/').next().unwrap_or(display_name);
-            return Some(short_name.to_string());
-        }
-    }
-
-    // Fallback: detect Docker projects by Dockerfile/compose files
-    if path.join("Dockerfile").exists()
-        || path.join("docker-compose.yml").exists()
-        || path.join("docker-compose.yaml").exists()
-        || path.join("compose.yml").exists()
-        || path.join("compose.yaml").exists()
-    {
-        return Some("Docker".to_string());
-    }
-
-    None
-}
-
 /// Preview info for clean confirmation dialog.
 #[derive(Debug, Clone, Default)]
 pub struct CleanPreview {
@@ -327,9 +280,12 @@ pub struct App {
     /// Whether to detect system-level resources (Docker, etc.).
     pub detect_system: bool,
 
-    /// Reused detector registry and per-path results for cheap UI rebuilds.
-    detector_registry: DetectorRegistry,
-    project_type_cache: HashMap<PathBuf, Option<String>>,
+    /// Projects discovered by the shared project-scanning engine.
+    detected_projects: HashMap<PathBuf, DetectedProject>,
+    project_detection_running: bool,
+    project_receiver: Option<Receiver<Vec<DetectedProject>>>,
+    #[allow(dead_code)]
+    project_thread: Option<JoinHandle<()>>,
 
     /// Receiver for progressive scan updates.
     scan_receiver: Option<Receiver<ScanUpdate>>,
@@ -378,8 +334,10 @@ impl App {
             confirmation_target: None,
             system_resources: Vec::new(),
             detect_system: false,
-            detector_registry: DetectorRegistry::new(),
-            project_type_cache: HashMap::new(),
+            detected_projects: HashMap::new(),
+            project_detection_running: false,
+            project_receiver: None,
+            project_thread: None,
             scan_receiver: None,
             scan_thread: None,
             operation: None,
@@ -485,6 +443,52 @@ impl App {
         false
     }
 
+    fn discover_projects(root: &Path) -> Vec<DetectedProject> {
+        ProjectScanner::new(DetectorRegistry::new(), ProjectScanOptions::default()).scan(root)
+    }
+
+    fn set_detected_projects(&mut self, projects: Vec<DetectedProject>) {
+        self.detected_projects = projects
+            .into_iter()
+            .map(|project| (project.path.clone(), project))
+            .collect();
+    }
+
+    fn refresh_projects_blocking(&mut self) {
+        let projects = Self::discover_projects(&self.root);
+        self.set_detected_projects(projects);
+    }
+
+    fn start_project_detection(&mut self) {
+        self.detected_projects.clear();
+        self.project_receiver = None;
+        self.project_thread = None;
+
+        let root = self.root.clone();
+        let (tx, rx) = mpsc::channel();
+        self.project_receiver = Some(rx);
+        self.project_detection_running = true;
+        self.project_thread = Some(thread::spawn(move || {
+            let _ = tx.send(Self::discover_projects(&root));
+        }));
+    }
+
+    fn poll_project_detection(&mut self) -> bool {
+        let projects = self
+            .project_receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(projects) = projects {
+            self.set_detected_projects(projects);
+            self.project_detection_running = false;
+            self.project_receiver = None;
+            self.project_thread = None;
+            self.rebuild_visible_entries();
+            return true;
+        }
+        false
+    }
+
     /// Recursively flatten the tree into visible_entries.
     fn flatten_tree(&mut self, entry: &DirEntry, depth: usize) {
         // Apply hidden filter
@@ -530,15 +534,15 @@ impl App {
         }
     }
 
-    fn project_type_for_path(&mut self, path: &Path) -> Option<String> {
-        if let Some(project_type) = self.project_type_cache.get(path) {
-            return project_type.clone();
-        }
-
-        let project_type = detect_project_type(&self.detector_registry, path);
-        self.project_type_cache
-            .insert(path.to_path_buf(), project_type.clone());
-        project_type
+    fn project_type_for_path(&self, path: &Path) -> Option<String> {
+        self.detected_projects.get(path).map(|project| {
+            project
+                .display_name
+                .split('/')
+                .next()
+                .unwrap_or(&project.display_name)
+                .to_string()
+        })
     }
 
     /// Check if any descendants match the search query.
@@ -684,6 +688,7 @@ impl App {
         // Docker/system queries have their own worker so process startup cannot
         // stall terminal rendering.
         self.start_system_detection();
+        self.start_project_detection();
         self.rebuild_visible_entries();
 
         self.scanning = true;
@@ -716,7 +721,6 @@ impl App {
         if let Some(scan_update) = update {
             match scan_update {
                 ScanUpdate::Started { root, total } => {
-                    self.project_type_cache.clear();
                     self.tree = Some(root);
                     self.rebuild_visible_entries();
                     if self.post_operation_message.is_none() {
@@ -775,7 +779,8 @@ impl App {
         let operation = self.poll_operation_result();
         let scan = self.poll_scan_result();
         let system = self.poll_system_detection();
-        operation || scan || system
+        let projects = self.poll_project_detection();
+        operation || scan || system || projects
     }
 
     /// Return the active destructive/cleanup operation, if any.
@@ -848,12 +853,17 @@ impl App {
             self.scan_thread = None;
             self.scanning = false;
         }
+        if self.project_detection_running {
+            self.project_receiver = None;
+            self.project_thread = None;
+            self.project_detection_running = false;
+        }
     }
 
     /// Trigger a rescan of the root directory (blocking version for tests).
     pub fn trigger_rescan(&mut self) {
         self.scanning = true;
-        self.project_type_cache.clear();
+        self.detected_projects.clear();
 
         // Detect system resources first — fast query that gives immediate results
         self.detect_system_resources();
@@ -863,6 +873,7 @@ impl App {
         options.include_hidden = true;
         match scan_directory(&self.root, &options) {
             Ok(tree) => {
+                self.refresh_projects_blocking();
                 // Preserve expanded paths that still exist
                 let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();
                 self.expanded.clear();
@@ -979,10 +990,14 @@ impl App {
 
         // Handle regular project cleaning
         let path = entry.entry.path;
+        let Some(project) = self.detected_projects.get(&path).cloned() else {
+            self.status_message = Some("Not a recognized project".to_string());
+            return;
+        };
         self.start_operation(
             OperationKind::Clean,
             format!("Cleaning {}...", path.display()),
-            move |cancel| clean_project(path, cancel),
+            move |cancel| clean_project(project, cancel),
         );
     }
 
@@ -997,11 +1012,7 @@ impl App {
             if entry.is_separator {
                 return false;
             }
-            let registry = DetectorRegistry::new();
-            registry
-                .detectors()
-                .iter()
-                .any(|d| d.detect(&entry.entry.path))
+            self.detected_projects.contains_key(&entry.entry.path)
         } else {
             false
         }
@@ -1037,43 +1048,32 @@ impl App {
 
         // Regular project preview
         let path = entry.entry.path;
-
-        let registry = DetectorRegistry::new();
-        let matching_detector = registry.detectors().iter().find(|d| d.detect(&path));
-
-        match matching_detector {
-            Some(detector) => {
-                let artifact_paths = detector.find_artifacts(&path);
-                if artifact_paths.is_empty() {
-                    self.status_message = Some("No artifacts to clean".to_string());
-                    return false;
-                }
-
-                let mut artifacts = Vec::new();
-                let mut total_size = 0u64;
-
-                for artifact_path in &artifact_paths {
-                    let name = artifact_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| artifact_path.display().to_string());
-                    let size = dir_size(artifact_path);
-                    artifacts.push((name, size));
-                    total_size += size;
-                }
-
-                self.clean_preview = Some(CleanPreview {
-                    project_name: detector.display_name().to_string(),
-                    artifacts,
-                    total_size,
-                });
-                true
-            }
-            None => {
-                self.status_message = Some("Not a recognized project".to_string());
-                false
-            }
+        let Some(project) = self.detected_projects.get(&path) else {
+            self.status_message = Some("Not a recognized project".to_string());
+            return false;
+        };
+        if project.artifact_paths.is_empty() {
+            self.status_message = Some("No artifacts to clean".to_string());
+            return false;
         }
+
+        let artifacts = project
+            .artifact_paths
+            .iter()
+            .map(|artifact_path| {
+                let name = artifact_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| artifact_path.display().to_string());
+                (name, dir_size(artifact_path))
+            })
+            .collect();
+        self.clean_preview = Some(CleanPreview {
+            project_name: project.display_name.clone(),
+            artifacts,
+            total_size: project.artifact_size,
+        });
+        true
     }
 
     /// Get filesystem disk usage information.
@@ -1571,11 +1571,8 @@ mod tests {
     #[test]
     fn test_clean_selected_not_a_project() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
-
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(root);
-        app.rebuild_visible_entries();
+        app.initial_scan();
 
         app.clean_selected();
         wait_for_operation(&mut app);
@@ -1597,11 +1594,8 @@ mod tests {
         fs::create_dir(&target_dir).unwrap();
         fs::write(target_dir.join("artifact.bin"), "x".repeat(1000)).unwrap();
 
-        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
-
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(root);
-        app.rebuild_visible_entries();
+        app.initial_scan();
 
         assert!(target_dir.exists());
         app.clean_selected();
@@ -1626,11 +1620,8 @@ mod tests {
         // Create a cargo project structure without target directory
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
-
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(root);
-        app.rebuild_visible_entries();
+        app.initial_scan();
 
         app.clean_selected();
         wait_for_operation(&mut app);
@@ -1647,11 +1638,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
-
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(root);
-        app.rebuild_visible_entries();
+        app.initial_scan();
 
         assert!(app.selected_is_project());
     }
@@ -1670,41 +1658,12 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_project_type_cargo() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
-
-        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
-        assert_eq!(project_type, Some("Rust".to_string()));
-    }
-
-    #[test]
-    fn test_detect_project_type_npm() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        fs::write(temp_dir.path().join("package.json"), "{}").unwrap();
-
-        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
-        assert_eq!(project_type, Some("npm".to_string()));
-    }
-
-    #[test]
-    fn test_detect_project_type_none() {
-        let temp_dir = tempfile::tempdir().unwrap();
-
-        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
-        assert!(project_type.is_none());
-    }
-
-    #[test]
     fn test_visible_entry_has_project_type() {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let root = DirEntry::new_dir(temp_dir.path().to_path_buf(), None);
-
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(root);
-        app.rebuild_visible_entries();
+        app.initial_scan();
 
         assert!(app.visible_entries[0].project_type.is_some());
         assert_eq!(
@@ -1714,14 +1673,16 @@ mod tests {
     }
 
     #[test]
-    fn test_project_detection_is_cached_until_rescan() {
+    fn test_project_scanner_results_are_cached_until_rescan() {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+        fs::create_dir(temp_dir.path().join("target")).unwrap();
+        fs::write(temp_dir.path().join("target/artifact"), vec![b'x'; 64]).unwrap();
 
         let mut app = App::new(temp_dir.path().to_path_buf());
-        app.tree = Some(DirEntry::new_dir(temp_dir.path().to_path_buf(), None));
-        app.rebuild_visible_entries();
-        assert_eq!(app.project_type_cache.len(), 1);
+        app.initial_scan();
+        assert_eq!(app.detected_projects.len(), 1);
+        assert_eq!(app.detected_projects[temp_dir.path()].artifact_size, 64);
         assert_eq!(
             app.visible_entries[0].project_type,
             Some("Rust".to_string())
@@ -1737,6 +1698,7 @@ mod tests {
 
         app.trigger_rescan();
         assert_eq!(app.visible_entries[0].project_type, None);
+        assert!(app.detected_projects.is_empty());
     }
 
     #[test]
