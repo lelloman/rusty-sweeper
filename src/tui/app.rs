@@ -1,6 +1,6 @@
 //! Application state for the TUI.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -90,8 +90,7 @@ fn dir_size(path: &Path) -> u64 {
 
 /// Detect project type at the given path.
 /// Returns the short display name (e.g., "Rust", "Node") if detected.
-fn detect_project_type(path: &Path) -> Option<String> {
-    let registry = DetectorRegistry::new();
+fn detect_project_type(registry: &DetectorRegistry, path: &Path) -> Option<String> {
     for detector in registry.detectors() {
         if detector.detect(path) {
             // Extract short name from display_name (e.g., "Rust/Cargo" -> "Rust")
@@ -176,6 +175,10 @@ pub struct App {
     /// Whether to detect system-level resources (Docker, etc.).
     pub detect_system: bool,
 
+    /// Reused detector registry and per-path results for cheap UI rebuilds.
+    detector_registry: DetectorRegistry,
+    project_type_cache: HashMap<PathBuf, Option<String>>,
+
     /// Receiver for progressive scan updates.
     scan_receiver: Option<Receiver<ScanUpdate>>,
 
@@ -204,6 +207,8 @@ impl App {
             confirmation_target: None,
             system_resources: Vec::new(),
             detect_system: false,
+            detector_registry: DetectorRegistry::new(),
+            project_type_cache: HashMap::new(),
             scan_receiver: None,
             scan_thread: None,
         }
@@ -293,7 +298,7 @@ impl App {
 
         // Detect project type for directories
         let project_type = if entry.is_dir {
-            detect_project_type(&entry.path)
+            self.project_type_for_path(&entry.path)
         } else {
             None
         };
@@ -316,6 +321,17 @@ impl App {
                 self.flatten_tree(child, depth + 1);
             }
         }
+    }
+
+    fn project_type_for_path(&mut self, path: &Path) -> Option<String> {
+        if let Some(project_type) = self.project_type_cache.get(path) {
+            return project_type.clone();
+        }
+
+        let project_type = detect_project_type(&self.detector_registry, path);
+        self.project_type_cache
+            .insert(path.to_path_buf(), project_type.clone());
+        project_type
     }
 
     /// Check if any descendants match the search query.
@@ -495,6 +511,7 @@ impl App {
         if let Some(scan_update) = update {
             match scan_update {
                 ScanUpdate::Started { root, total } => {
+                    self.project_type_cache.clear();
                     self.tree = Some(root);
                     self.rebuild_visible_entries();
                     self.status_message = Some(format!("Scanning 0/{}", total));
@@ -547,6 +564,7 @@ impl App {
     /// Trigger a rescan of the root directory (blocking version for tests).
     pub fn trigger_rescan(&mut self) {
         self.scanning = true;
+        self.project_type_cache.clear();
 
         // Detect system resources first — fast query that gives immediate results
         self.detect_system_resources();
@@ -1359,7 +1377,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let project_type = detect_project_type(temp_dir.path());
+        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
         assert_eq!(project_type, Some("Rust".to_string()));
     }
 
@@ -1368,7 +1386,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(temp_dir.path().join("package.json"), "{}").unwrap();
 
-        let project_type = detect_project_type(temp_dir.path());
+        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
         assert_eq!(project_type, Some("npm".to_string()));
     }
 
@@ -1376,7 +1394,7 @@ mod tests {
     fn test_detect_project_type_none() {
         let temp_dir = tempfile::tempdir().unwrap();
 
-        let project_type = detect_project_type(temp_dir.path());
+        let project_type = detect_project_type(&DetectorRegistry::new(), temp_dir.path());
         assert!(project_type.is_none());
     }
 
@@ -1396,6 +1414,32 @@ mod tests {
             app.visible_entries[0].project_type,
             Some("Rust".to_string())
         );
+    }
+
+    #[test]
+    fn test_project_detection_is_cached_until_rescan() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let mut app = App::new(temp_dir.path().to_path_buf());
+        app.tree = Some(DirEntry::new_dir(temp_dir.path().to_path_buf(), None));
+        app.rebuild_visible_entries();
+        assert_eq!(app.project_type_cache.len(), 1);
+        assert_eq!(
+            app.visible_entries[0].project_type,
+            Some("Rust".to_string())
+        );
+
+        fs::remove_file(temp_dir.path().join("Cargo.toml")).unwrap();
+        app.rebuild_visible_entries();
+        assert_eq!(
+            app.visible_entries[0].project_type,
+            Some("Rust".to_string()),
+            "ordinary UI rebuilds should reuse project detection"
+        );
+
+        app.trigger_rescan();
+        assert_eq!(app.visible_entries[0].project_type, None);
     }
 
     #[test]
