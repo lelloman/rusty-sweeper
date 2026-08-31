@@ -7,6 +7,10 @@ use std::path::PathBuf;
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
+    /// Directory to scan (defaults to the current working directory)
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
     /// Path to configuration file
     #[arg(short, long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
@@ -18,13 +22,24 @@ pub struct Cli {
     /// Suppress non-essential output
     #[arg(short, long, global = true)]
     pub quiet: bool,
+}
 
+/// Resolve the TUI's starting path, defaulting to the process working directory.
+pub fn starting_path(path: Option<PathBuf>) -> std::io::Result<PathBuf> {
+    match path {
+        Some(path) => Ok(path),
+        None => std::env::current_dir(),
+    }
 }
 
 /// Dedicated CLI for the monitor binary.
 #[derive(Parser, Debug)]
 #[command(name = "rusty-sweeper-monitor")]
-#[command(author, version, about = "Disk usage monitor daemon and alerting service")]
+#[command(
+    author,
+    version,
+    about = "Disk usage monitor daemon and alerting service"
+)]
 #[command(propagate_version = true)]
 pub struct MonitorCli {
     /// Path to configuration file
@@ -96,8 +111,23 @@ mod tests {
     #[test]
     fn parse_main_cli_without_subcommands() {
         let cli = Cli::parse_from(["rusty-sweeper"]);
+        assert!(cli.path.is_none());
+        assert_eq!(
+            starting_path(cli.path).unwrap(),
+            std::env::current_dir().unwrap()
+        );
         assert!(cli.config.is_none());
         assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn parse_main_cli_with_starting_path() {
+        let cli = Cli::parse_from(["rusty-sweeper", "/tmp/projects"]);
+        assert_eq!(cli.path, Some(PathBuf::from("/tmp/projects")));
+        assert_eq!(
+            starting_path(cli.path).unwrap(),
+            PathBuf::from("/tmp/projects")
+        );
     }
 
     #[test]

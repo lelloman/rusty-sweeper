@@ -1,8 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use std::path::PathBuf;
 
-use rusty_sweeper::cli::Cli;
+use rusty_sweeper::cli::{starting_path, Cli};
 use rusty_sweeper::config::Config;
 
 fn main() -> Result<()> {
@@ -16,7 +15,7 @@ fn main() -> Result<()> {
 
     tracing::debug!(?config, "Loaded configuration");
 
-    let root = PathBuf::from("/");
+    let root = starting_path(cli.path)?;
     tracing::info!(path = %root.display(), "Starting TUI");
     rusty_sweeper::tui::run(root)?;
 

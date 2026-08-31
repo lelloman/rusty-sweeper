@@ -34,8 +34,11 @@ cargo install --path .
 ### Interactive TUI
 
 ```bash
-# Launch TUI at root
+# Launch TUI in the current working directory
 rusty-sweeper
+
+# Scan a specific directory instead of the current working directory
+rusty-sweeper /path/to/scan
 
 # `rusty-sweeper` is the only user-facing mode of the main binary
 ```
