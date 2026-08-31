@@ -409,8 +409,16 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                 .or_else(|| app.selected_entry())
                 .map(|e| {
                     let p = e.entry.path.display().to_string();
-                    if p.len() > 35 {
-                        format!("...{}", &p[p.len() - 32..])
+                    if p.chars().count() > 35 {
+                        let suffix: String = p
+                            .chars()
+                            .rev()
+                            .take(32)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect();
+                        format!("...{suffix}")
                     } else {
                         p
                     }
@@ -617,6 +625,21 @@ mod tests {
         let mut app = App::new(PathBuf::from("/test"));
         app.tree = Some(DirEntry::new_dir(PathBuf::from("/test"), None));
         app.rebuild_visible_entries();
+        app.mode = Mode::Confirm(ConfirmAction::Delete);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn test_render_delete_dialog_with_long_unicode_path() {
+        let path = PathBuf::from(format!("/{}", "界".repeat(40)));
+        let entry = crate::scanner::DirEntry::new_file(path.clone(), 10, 10, None);
+        let mut app = App::new(PathBuf::from("/"));
+        app.tree = Some(entry);
+        app.rebuild_visible_entries();
+        app.confirmation_target = app.selected_entry().cloned();
         app.mode = Mode::Confirm(ConfirmAction::Delete);
 
         let backend = TestBackend::new(80, 24);
