@@ -83,11 +83,22 @@ impl CleanExecutor {
                         };
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "Native clean command failed for {}: {}, falling back to direct deletion",
-                            project.path.display(),
-                            e
-                        );
+                        if e.kind() == io::ErrorKind::NotFound {
+                            // A project may be a Gradle submodule without its
+                            // own wrapper. Falling back to direct deletion is
+                            // expected and should not corrupt the TUI with a
+                            // warning on stderr.
+                            tracing::debug!(
+                                "Native clean command unavailable for {}, falling back to direct deletion",
+                                project.path.display()
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Native clean command failed for {}: {}, falling back to direct deletion",
+                                project.path.display(),
+                                e
+                            );
+                        }
                     }
                 }
             }

@@ -86,7 +86,7 @@ cache_ttl = 3600
 [cleaner]
 project_types = ["cargo", "gradle", "maven", "npm", "go", "cmake", "python", "bazel", "dotnet"]
 exclude_patterns = ["**/.git", "**/vendor"]
-min_age_days = 7
+min_age_days = 0
 max_depth = 10
 parallel_jobs = 4
 
@@ -117,7 +117,7 @@ large_dir_threshold = 1073741824
 | `C` | Clean all eligible projects under selected directory |
 | `/` | Search |
 | `s` | Cycle sort order |
-| `.` | Toggle hidden files |
+| `.` | Hide/show hidden files (shown by default) |
 | `r` | Rescan |
 | `?` | Help |
 | `Esc` | Cancel active work, otherwise quit |

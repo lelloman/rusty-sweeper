@@ -95,7 +95,7 @@ impl Default for CleanerConfig {
                 "dotnet".to_string(),
             ],
             exclude_patterns: vec!["**/.git".to_string(), "**/vendor".to_string()],
-            min_age_days: 7,
+            min_age_days: 0,
             max_depth: 10,
             parallel_jobs: 4,
         }
@@ -117,7 +117,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         Self {
             color_scheme: "auto".to_string(),
-            show_hidden: false,
+            show_hidden: true,
             default_sort: "size".to_string(),
             large_dir_threshold: 1024 * 1024 * 1024, // 1 GB
         }

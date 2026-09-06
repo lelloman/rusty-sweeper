@@ -385,33 +385,6 @@ fn project_scan_options(config: &CleanerConfig) -> ProjectScanOptions {
     }
 }
 
-fn disk_scan_options(mut options: ScanOptions, cleaner_config: &CleanerConfig) -> ScanOptions {
-    // Artifact contents are handled by the project cleaner. Walking them as
-    // ordinary disk-usage entries can dominate startup time for large Cargo,
-    // Node, Gradle, and Python projects.
-    let artifact_patterns = [
-        "**/target",
-        "**/node_modules",
-        "**/.gradle",
-        "**/build",
-        "**/bin",
-        "**/obj",
-        "**/venv",
-        "**/.venv",
-        "**/__pycache__",
-        "**/bazel-out",
-    ];
-    options
-        .exclude_patterns
-        .extend(cleaner_config.exclude_patterns.iter().cloned());
-    options
-        .exclude_patterns
-        .extend(artifact_patterns.into_iter().map(String::from));
-    options.exclude_patterns.sort();
-    options.exclude_patterns.dedup();
-    options
-}
-
 /// Main application state for the TUI.
 pub struct App {
     /// Root directory being explored.
@@ -540,7 +513,7 @@ impl App {
             mode: Mode::Normal,
             search_query: String::new(),
             sort_order: SortOrder::default(),
-            show_hidden: false,
+            show_hidden: true,
             should_quit: false,
             status_message: None,
             post_operation_message: None,
@@ -1123,7 +1096,7 @@ impl App {
         self.scan_receiver = Some(rx);
 
         let root = self.root.clone();
-        let mut options = disk_scan_options(self.scan_options.clone(), &self.cleaner_config);
+        let mut options = self.scan_options.clone();
         options.include_hidden = true;
 
         // Spawn background thread for progressive scanning
@@ -1299,7 +1272,7 @@ impl App {
         self.detect_system_resources();
 
         // Always scan with hidden files included so we can toggle visibility in the UI
-        let mut options = disk_scan_options(self.scan_options.clone(), &self.cleaner_config);
+        let mut options = self.scan_options.clone();
         options.include_hidden = true;
         match scan_directory(&self.root, &options) {
             Ok(tree) => {
