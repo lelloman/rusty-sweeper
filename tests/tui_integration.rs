@@ -7,6 +7,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rusty_sweeper::config::CleanerConfig;
+use rusty_sweeper::scanner::ScanOptions;
 use rusty_sweeper::tui::app::{ConfirmAction, Mode};
 use rusty_sweeper::tui::event::handle_key_event;
 use rusty_sweeper::tui::App;
@@ -22,7 +24,9 @@ fn key_char(c: char) -> KeyEvent {
 
 fn wait_for_background_work(app: &mut App) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while (app.operation_kind().is_some() || app.scanning) && std::time::Instant::now() < deadline {
+    while (app.operation_kind().is_some() || app.scanning || app.recursive_preview_running)
+        && std::time::Instant::now() < deadline
+    {
         app.poll_background_work();
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -31,6 +35,20 @@ fn wait_for_background_work(app: &mut App) {
         "background operation timed out"
     );
     assert!(!app.scanning, "background rescan timed out");
+}
+
+fn app_for_cleaning(root: PathBuf, project_types: &[&str]) -> App {
+    let mut cleaner = CleanerConfig::default();
+    cleaner.min_age_days = 0;
+    cleaner.project_types = project_types
+        .iter()
+        .map(|kind| (*kind).to_string())
+        .collect();
+    App::with_options(
+        root,
+        ScanOptions::default().with_one_file_system(true),
+        cleaner,
+    )
 }
 
 #[test]
@@ -329,7 +347,7 @@ fn test_tui_clean_confirmation_pins_original_target() {
     fs::write(first_project.join("target/artifact"), "x".repeat(20)).unwrap();
     fs::write(second_project.join("target/artifact"), "x").unwrap();
 
-    let mut app = App::new(temp.path().to_path_buf());
+    let mut app = app_for_cleaning(temp.path().to_path_buf(), &["cargo"]);
     app.initial_scan();
 
     app.selected = 1;
@@ -356,7 +374,7 @@ fn test_tui_partial_clean_reports_freed_space_and_refreshes_tree() {
     // file forces remove_dir_all to fail after build/ has been removed.
     fs::write(&invalid_artifact, "not a directory").unwrap();
 
-    let mut app = App::new(temp.path().to_path_buf());
+    let mut app = app_for_cleaning(temp.path().to_path_buf(), &["gradle"]);
     app.initial_scan();
     assert!(app
         .visible_entries
@@ -376,6 +394,51 @@ fn test_tui_partial_clean_reports_freed_space_and_refreshes_tree() {
     let status = app.status_message.as_deref().unwrap_or_default();
     assert!(status.contains("partially cleaned"));
     assert!(status.contains("128 B"));
+}
+
+#[test]
+fn test_tui_recursive_clean_selected_directory() {
+    let temp = tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    let first = workspace.join("first-app");
+    let second = workspace.join("second-app");
+    let outside = temp.path().join("outside-app");
+    for project in [&first, &second, &outside] {
+        fs::create_dir_all(project.join("node_modules")).unwrap();
+        fs::write(project.join("package.json"), "{}").unwrap();
+        fs::write(project.join("node_modules/dependency.js"), "x".repeat(32)).unwrap();
+    }
+
+    let mut app = app_for_cleaning(temp.path().to_path_buf(), &["npm"]);
+    app.initial_scan();
+    app.selected = app
+        .visible_entries
+        .iter()
+        .position(|entry| entry.entry.path == workspace)
+        .unwrap();
+
+    handle_key_event(&mut app, key_char('C'));
+    wait_for_background_work(&mut app);
+
+    assert!(matches!(
+        app.mode,
+        Mode::Confirm(ConfirmAction::CleanRecursive)
+    ));
+    let preview = app.clean_preview.as_ref().unwrap();
+    assert_eq!(preview.projects.len(), 2);
+    assert_eq!(preview.scope_path, Some(workspace.clone()));
+
+    handle_key_event(&mut app, key_char('y'));
+    wait_for_background_work(&mut app);
+
+    assert!(!first.join("node_modules").exists());
+    assert!(!second.join("node_modules").exists());
+    assert!(outside.join("node_modules").exists());
+    assert!(app
+        .status_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Cleaned 2 projects"));
 }
 
 #[test]

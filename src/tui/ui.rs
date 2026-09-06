@@ -347,7 +347,7 @@ fn render_entry(
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let hints = match app.mode {
         Mode::Normal => {
-            "[↑↓] Navigate  [←→] Expand  [d] Delete  [c] Clean  [/] Search  [?] Help  [q] Quit"
+            "[↑↓] Navigate  [←→] Expand  [d] Delete  [c] Clean  [C] Clean subtree  [/] Search  [?] Help  [q] Quit"
         }
         Mode::Search => "[Enter] Confirm  [Esc] Cancel",
         Mode::Confirm(_) => "[y] Yes  [n] No",
@@ -479,6 +479,49 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                 (" Clean Project ", "No preview available".to_string(), 5u16)
             }
         }
+        ConfirmAction::CleanRecursive => {
+            if let Some(preview) = &app.clean_preview {
+                let scope = preview
+                    .scope_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "selected directory".to_string());
+                let mut project_lines = String::new();
+                let max_projects = 5;
+                for project in preview.projects.iter().take(max_projects) {
+                    project_lines.push_str(&format!(
+                        "  {} ({} artifacts, {})\n",
+                        project.display_name,
+                        project.artifact_count,
+                        humansize::format_size(project.artifact_size, humansize::BINARY)
+                    ));
+                }
+                if preview.projects.len() > max_projects {
+                    project_lines.push_str(&format!(
+                        "  ... and {} more\n",
+                        preview.projects.len() - max_projects
+                    ));
+                }
+                let message = format!(
+                    "Clean {} projects under '{}' ?\n\n{}Total: {}\n\n[y]es  [n]o",
+                    preview.projects.len(),
+                    scope,
+                    project_lines,
+                    humansize::format_size(preview.total_size, humansize::BINARY)
+                );
+                let height = (7
+                    + preview.projects.len().min(max_projects)
+                    + usize::from(preview.projects.len() > max_projects))
+                .min(15) as u16;
+                (" Clean Directory ", message, height)
+            } else {
+                (
+                    " Clean Directory ",
+                    "No preview available".to_string(),
+                    5u16,
+                )
+            }
+        }
     };
 
     // Center the dialog
@@ -536,8 +579,8 @@ fn render_help_overlay(frame: &mut Frame) {
  ─────────────────────────────────
  d          Delete selected
  c          Clean project artifacts
+ C          Clean all projects under selected directory
  r          Refresh / Rescan
-
  VIEW
  ─────────────────────────────────
  /          Search / Filter
@@ -562,6 +605,7 @@ fn render_help_overlay(frame: &mut Frame) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::{CleanPreview, ProjectPreview};
     use ratatui::backend::TestBackend;
     use std::path::PathBuf;
 
@@ -612,6 +656,29 @@ mod tests {
         let mut app = App::new(PathBuf::from("/"));
         app.mode = Mode::Search;
         app.search_query = "test".to_string();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn test_render_recursive_clean_dialog() {
+        let mut app = App::new(PathBuf::from("/workspace"));
+        app.mode = Mode::Confirm(ConfirmAction::CleanRecursive);
+        app.clean_preview = Some(CleanPreview {
+            project_name: "/workspace".to_string(),
+            artifacts: Vec::new(),
+            total_size: 2048,
+            recursive: true,
+            scope_path: Some(PathBuf::from("/workspace")),
+            projects: vec![ProjectPreview {
+                path: PathBuf::from("/workspace/app"),
+                display_name: "npm".to_string(),
+                artifact_count: 1,
+                artifact_size: 2048,
+            }],
+        });
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();

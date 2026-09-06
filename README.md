@@ -11,7 +11,7 @@ Rusty Sweeper is implemented and test-covered across its main command surface:
 
 Current limitations:
 
-- The configuration file is loaded and validated, but most command behavior is still driven directly by CLI flags rather than config values.
+- Some configuration sections remain informational, but scanner and TUI cleaner settings are active.
 - Cleanup and scan engines still exist in the codebase, but they are no longer exposed as standalone CLI subcommands.
 
 ## Features
@@ -72,7 +72,7 @@ rusty-sweeper-monitor --stop
 
 Configuration file: `~/.config/rusty-sweeper/config.toml`
 
-The file is currently loaded and validated on startup, but behavior is not yet fully driven by these values. Treat it as partially implemented.
+Scanner and TUI cleaner behavior is driven by the corresponding values.
 
 Scanner parallelism, filesystem-boundary behavior, and the persistent metadata cache are active. Cached files are validated by device/inode, size, allocated blocks, and nanosecond modification/change times before their accounting is reused.
 
@@ -84,7 +84,7 @@ use_cache = true
 cache_ttl = 3600
 
 [cleaner]
-project_types = ["cargo", "gradle", "npm", "maven"]
+project_types = ["cargo", "gradle", "maven", "npm", "go", "cmake", "python", "bazel", "dotnet"]
 exclude_patterns = ["**/.git", "**/vendor"]
 min_age_days = 7
 max_depth = 10
@@ -114,6 +114,7 @@ large_dir_threshold = 1073741824
 | `h` / `Left` / `Backspace` | Collapse/go up |
 | `d` / `Delete` | Delete selected |
 | `c` | Clean project |
+| `C` | Clean all eligible projects under selected directory |
 | `/` | Search |
 | `s` | Cycle sort order |
 | `.` | Toggle hidden files |

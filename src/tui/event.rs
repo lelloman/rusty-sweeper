@@ -32,6 +32,10 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             app.cancel_operation();
             return;
         }
+        if app.recursive_preview_running {
+            app.cancel_recursive_clean_preview();
+            return;
+        }
         if app.scanning {
             app.cancel_scan();
             app.status_message = Some("Scan cancelled".to_string());
@@ -104,6 +108,9 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                 app.mode = Mode::Confirm(ConfirmAction::Clean);
             }
         }
+        KeyCode::Char('C') => {
+            app.start_recursive_clean_preview();
+        }
         KeyCode::Char('r') => {
             app.start_background_scan();
         }
@@ -168,12 +175,15 @@ fn handle_confirm_mode(app: &mut App, key: KeyEvent, action: ConfirmAction) {
             match action {
                 ConfirmAction::Delete => app.delete_selected(),
                 ConfirmAction::Clean => app.clean_selected(),
+                ConfirmAction::CleanRecursive => app.clean_recursive_selected(),
             }
             app.confirmation_target = None;
             app.mode = Mode::Normal;
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
             app.confirmation_target = None;
+            app.clean_preview = None;
+            app.clear_recursive_clean_preview();
             app.mode = Mode::Normal;
         }
         _ => {}

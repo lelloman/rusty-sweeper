@@ -26,7 +26,7 @@ fn main() -> Result<()> {
         }
     }
     tracing::info!(path = %root.display(), "Starting TUI");
-    rusty_sweeper::tui::run_with_scan_options(root, scan_options)?;
+    rusty_sweeper::tui::run_with_options(root, scan_options, config.cleaner.clone())?;
 
     Ok(())
 }

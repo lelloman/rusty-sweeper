@@ -5,7 +5,7 @@ use crate::cleaner::executor::{CleanExecutor, CleanOptions, CleanResult};
 use crate::cleaner::registry::DetectorRegistry;
 use crate::cleaner::system_cleaner::SystemCleanResult;
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Progress tracker for cleaning operations.
@@ -133,6 +133,50 @@ impl CleanOrchestrator {
         })
     }
 
+    /// Clean multiple projects in parallel, skipping projects that have not
+    /// started when cancellation is requested.
+    pub fn clean_all_cancellable(
+        &self,
+        projects: Vec<DetectedProject>,
+        progress: Option<Arc<CleanProgress>>,
+        cancel: Arc<AtomicBool>,
+    ) -> Vec<CleanResult> {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.parallelism.max(1))
+            .build()
+            .unwrap();
+
+        pool.install(|| {
+            projects
+                .into_par_iter()
+                .map(|project| {
+                    if cancel.load(Ordering::Acquire) {
+                        return CleanResult::Skipped {
+                            project,
+                            reason: "cancelled".to_string(),
+                        };
+                    }
+
+                    if let Some(ref prog) = progress {
+                        prog.set_current(project.path.display().to_string());
+                    }
+
+                    let clean_cmd = self
+                        .registry
+                        .get(&project.project_type)
+                        .and_then(|d| d.clean_command());
+                    let result = self.executor.clean(&project, clean_cmd);
+
+                    if let Some(ref prog) = progress {
+                        prog.increment();
+                    }
+
+                    result
+                })
+                .collect()
+        })
+    }
+
     /// Get summary statistics from results.
     pub fn summarize(results: &[CleanResult]) -> CleanSummary {
         let mut summary = CleanSummary::default();
@@ -225,6 +269,25 @@ mod tests {
 
         assert_eq!(results.len(), 5);
         assert_eq!(progress.completed(), 5);
+    }
+
+    #[test]
+    fn test_clean_all_cancellable_skips_when_cancelled() {
+        let (_tmp, projects) = create_test_projects(1);
+        let artifact = projects[0].artifact_paths[0].clone();
+        let orchestrator = CleanOrchestrator::new(
+            DetectorRegistry::new(),
+            CleanOptions {
+                dry_run: false,
+                use_native_commands: false,
+            },
+            1,
+        );
+        let cancel = Arc::new(AtomicBool::new(true));
+        let results = orchestrator.clean_all_cancellable(projects, None, cancel);
+
+        assert!(matches!(results[0], CleanResult::Skipped { .. }));
+        assert!(artifact.exists());
     }
 
     #[test]

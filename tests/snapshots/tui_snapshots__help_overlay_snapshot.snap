@@ -23,8 +23,8 @@ expression: output
 │         │ ─────────────────────────────────                        │         │
 │         │ d          Delete selected                               │         │
 │         │ c          Clean project artifacts                       │         │
+│         │ C          Clean all projects under selected directory   │         │
 │         │ r          Refresh / Rescan                              │         │
-│         │                                                          │         │
 │         │ VIEW                                                     │         │
 │         │ ─────────────────────────────────                        │         │
 │         │ /          Search / Filter                               │         │

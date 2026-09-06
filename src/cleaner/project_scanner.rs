@@ -44,30 +44,60 @@ impl ProjectScanner {
     ///
     /// Returns a list of detected projects with their artifact information.
     pub fn scan(&self, root: &Path) -> Vec<DetectedProject> {
-        let mut projects = Vec::new();
-        let mut skip_dirs: Vec<PathBuf> = Vec::new();
+        self.scan_internal(root, true)
+    }
 
-        let walker = WalkDir::new(root)
+    /// Scan for projects without calculating artifact sizes.
+    ///
+    /// This is intended for interactive recognition. Artifact sizes can be
+    /// expensive to calculate for large `target`/`node_modules` directories
+    /// and are not needed to determine whether a project exists.
+    pub fn scan_fast(&self, root: &Path) -> Vec<DetectedProject> {
+        self.scan_internal(root, false)
+    }
+
+    fn scan_internal(&self, root: &Path, calculate_sizes: bool) -> Vec<DetectedProject> {
+        let mut projects = Vec::new();
+        let mut artifact_dirs: Vec<PathBuf> = Vec::new();
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+        let mut walker = WalkDir::new(&root)
             .max_depth(self.options.max_depth)
             .follow_links(self.options.follow_symlinks)
             .into_iter();
 
-        for entry in walker.flatten() {
+        while let Some(result) = walker.next() {
+            let Ok(entry) = result else {
+                continue;
+            };
             if !entry.file_type().is_dir() {
                 continue;
             }
 
             let path = entry.path();
 
+            // Artifact contents cannot contain a project that belongs to the
+            // source tree, and may contain millions of files. Prune them once
+            // their owning project has been recognized.
+            if artifact_dirs
+                .iter()
+                .any(|artifact| path.starts_with(artifact))
+            {
+                walker.skip_current_dir();
+                continue;
+            }
+
             // Check exclusion patterns
-            if !self.should_visit_path(path, &skip_dirs) {
+            if !self.should_visit_path(path, &root) {
                 continue;
             }
 
             // Check if this directory is a project
-            if let Some(project) = self.detect_project(path) {
-                // Don't recurse into this project
-                skip_dirs.push(path.to_path_buf());
+            if let Some(mut project) = self.detect_project(path) {
+                if calculate_sizes {
+                    project.artifact_size = self.calculate_artifact_size(&project.artifact_paths);
+                }
+                artifact_dirs.extend(project.artifact_paths.iter().cloned());
                 projects.push(project);
             }
         }
@@ -75,27 +105,56 @@ impl ProjectScanner {
         projects
     }
 
-    fn should_visit_path(&self, path: &Path, skip_dirs: &[PathBuf]) -> bool {
-        // Check if any path component matches an exclude pattern
-        for component in path.components() {
-            if let std::path::Component::Normal(name) = component {
-                let name = name.to_string_lossy();
-                for pattern in &self.options.exclude_patterns {
-                    if name == pattern.as_str() {
-                        return false;
-                    }
-                }
+    fn should_visit_path(&self, path: &Path, root: &Path) -> bool {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        let relative_text = relative.to_string_lossy();
+        if self.options.exclude_patterns.iter().any(|pattern| {
+            let pattern = pattern.trim_start_matches("./");
+            if let Some(component_pattern) = pattern.strip_prefix("**/") {
+                relative.components().any(|component| {
+                    component
+                        .as_os_str()
+                        .to_str()
+                        .is_some_and(|name| Self::wildcard_matches(component_pattern, name))
+                })
+            } else if pattern.contains('/') {
+                Self::wildcard_matches(pattern, &relative_text)
+            } else {
+                relative.components().any(|component| {
+                    component
+                        .as_os_str()
+                        .to_str()
+                        .is_some_and(|name| Self::wildcard_matches(pattern, name))
+                })
             }
-        }
-
-        // Check if inside a detected project
-        for skip in skip_dirs {
-            if path.starts_with(skip) && path != skip {
-                return false;
-            }
+        }) {
+            return false;
         }
 
         true
+    }
+
+    fn wildcard_matches(pattern: &str, value: &str) -> bool {
+        let pattern: Vec<char> = pattern.chars().collect();
+        let value: Vec<char> = value.chars().collect();
+        let mut previous = vec![false; value.len() + 1];
+        previous[0] = true;
+
+        for token in pattern {
+            let mut current = vec![false; value.len() + 1];
+            if token == '*' {
+                current[0] = previous[0];
+            }
+            for (index, character) in value.iter().enumerate() {
+                current[index + 1] = match token {
+                    '*' => previous[index + 1] || current[index],
+                    '?' => previous[index],
+                    literal => previous[index] && literal == *character,
+                };
+            }
+            previous = current;
+        }
+        previous[value.len()]
     }
 
     fn detect_project(&self, path: &Path) -> Option<DetectedProject> {
@@ -115,13 +174,11 @@ impl ProjectScanner {
                     continue;
                 }
 
-                let artifact_size = self.calculate_artifact_size(&artifact_paths);
-
                 return Some(DetectedProject {
                     path: path.to_path_buf(),
                     project_type: detector.id().to_string(),
                     display_name: detector.display_name().to_string(),
-                    artifact_size,
+                    artifact_size: 0,
                     artifact_paths,
                 });
             }
@@ -329,7 +386,12 @@ mod tests {
     fn test_scan_nested_project() {
         let tmp = TempDir::new().unwrap();
 
-        // Create nested project
+        // Both a parent project and a nested project must be discovered.
+        let parent = tmp.path().join("projects");
+        fs::create_dir_all(&parent).unwrap();
+        fs::write(parent.join("Cargo.toml"), "[package]").unwrap();
+        fs::create_dir(parent.join("target")).unwrap();
+
         let nested = tmp.path().join("projects/libs/util");
         fs::create_dir_all(&nested).unwrap();
         fs::write(nested.join("Cargo.toml"), "[package]").unwrap();
@@ -341,8 +403,45 @@ mod tests {
 
         let projects = scanner.scan(tmp.path());
 
+        assert_eq!(projects.len(), 2);
+        assert!(projects.iter().any(|project| project.path == parent));
+        assert!(projects.iter().any(|project| project.path == nested));
+    }
+
+    #[test]
+    fn test_scan_fast_recognizes_project_without_artifact_size_walk() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(project.join("target/debug")).unwrap();
+        fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+        fs::write(project.join("target/debug/artifact"), "x").unwrap();
+
+        let scanner =
+            ProjectScanner::new(DetectorRegistry::with_types(&["cargo"]), Default::default());
+        let projects = scanner.scan_fast(tmp.path());
+
         assert_eq!(projects.len(), 1);
-        assert!(projects[0].path.ends_with("util"));
+        assert_eq!(projects[0].path, project);
+        assert_eq!(projects[0].artifact_size, 0);
+        assert_eq!(projects[0].artifact_paths.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_normalizes_relative_root_paths() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("workspace");
+        let project = root.join("project");
+        fs::create_dir_all(project.join("target")).unwrap();
+        fs::create_dir(root.join("alias")).unwrap();
+        fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+
+        let relative_root = root.join("alias/../");
+        let scanner =
+            ProjectScanner::new(DetectorRegistry::with_types(&["cargo"]), Default::default());
+        let projects = scanner.scan_fast(&relative_root);
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].path, project.canonicalize().unwrap());
     }
 
     #[test]

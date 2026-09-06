@@ -14,6 +14,7 @@ use crate::cleaner::{
     CleanOptions, CleanOrchestrator, CleanResult, DetectedProject, DetectedSystemResource,
     DetectorRegistry, ProjectScanner, ScanOptions as ProjectScanOptions, SystemCleanerRegistry,
 };
+use crate::config::CleanerConfig;
 use crate::scanner::{
     scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate,
 };
@@ -39,6 +40,8 @@ pub enum ConfirmAction {
     Delete,
     /// Clean a project's build artifacts.
     Clean,
+    /// Clean all eligible projects below a directory.
+    CleanRecursive,
 }
 
 /// Long-running action currently executing outside the UI thread.
@@ -46,6 +49,7 @@ pub enum ConfirmAction {
 pub enum OperationKind {
     Delete,
     Clean,
+    CleanRecursive,
 }
 
 struct OperationState {
@@ -157,6 +161,7 @@ fn refresh_cleaned_project(
 fn clean_project(
     project: DetectedProject,
     scan_options: ScanOptions,
+    cleaner_config: CleanerConfig,
     cancel: Arc<AtomicBool>,
 ) -> OperationOutcome {
     if cancel.load(Ordering::Acquire) {
@@ -175,7 +180,11 @@ fn clean_project(
         return cancelled_outcome("Clean");
     }
 
-    let orchestrator = CleanOrchestrator::new(DetectorRegistry::new(), CleanOptions::default(), 1);
+    let orchestrator = CleanOrchestrator::new(
+        detector_registry(&cleaner_config),
+        CleanOptions::default(),
+        cleaner_config.parallel_jobs.max(1),
+    );
     let mut results = orchestrator.clean_all(vec![project.clone()], None);
     let (message, refresh_project) = match results
         .pop()
@@ -208,6 +217,76 @@ fn clean_project(
         rescan: false,
         refresh_system_resources: false,
         project_refresh,
+    }
+}
+
+fn clean_projects(
+    projects: Vec<DetectedProject>,
+    scope: PathBuf,
+    cleaner_config: CleanerConfig,
+    cancel: Arc<AtomicBool>,
+) -> OperationOutcome {
+    if cancel.load(Ordering::Acquire) {
+        return cancelled_outcome("Recursive cleanup");
+    }
+
+    let projects: Vec<_> = projects
+        .into_iter()
+        .filter(|project| {
+            project.path.starts_with(&scope)
+                && project.path.is_dir()
+                && project
+                    .artifact_paths
+                    .iter()
+                    .all(|artifact| artifact.starts_with(&project.path))
+        })
+        .collect();
+    if projects.is_empty() {
+        return OperationOutcome {
+            message: "No cleanable projects remain".to_string(),
+            rescan: false,
+            refresh_system_resources: false,
+            project_refresh: None,
+        };
+    }
+
+    let total = projects.len();
+    let orchestrator = CleanOrchestrator::new(
+        detector_registry(&cleaner_config),
+        CleanOptions::default(),
+        cleaner_config.parallel_jobs.max(1),
+    );
+    let results = orchestrator.clean_all_cancellable(projects, None, Arc::clone(&cancel));
+    let summary = CleanOrchestrator::summarize(&results);
+    let message = if cancel.load(Ordering::Acquire) {
+        format!(
+            "Recursive cleanup cancelled: cleaned {}/{} projects, freed {} ({} failed)",
+            summary.success_count,
+            total,
+            humansize::format_size(summary.total_freed, humansize::BINARY),
+            summary.failed_count
+        )
+    } else if summary.failed_count == 0 && summary.skipped_count == 0 {
+        format!(
+            "Cleaned {} projects, freed {}",
+            summary.success_count,
+            humansize::format_size(summary.total_freed, humansize::BINARY)
+        )
+    } else {
+        format!(
+            "Cleaned {} projects; {} failed, {} skipped, freed {}",
+            summary.success_count,
+            summary.failed_count,
+            summary.skipped_count,
+            humansize::format_size(summary.total_freed, humansize::BINARY)
+        )
+    };
+
+    OperationOutcome {
+        message,
+        rescan: true,
+        refresh_system_resources: false,
+        project_refresh: None,
     }
 }
 
@@ -276,6 +355,61 @@ pub struct CleanPreview {
     pub artifacts: Vec<(String, u64)>, // (name, size)
     /// Total size that would be freed.
     pub total_size: u64,
+    /// Whether this preview covers a directory subtree.
+    pub recursive: bool,
+    /// Directory scope for a recursive preview.
+    pub scope_path: Option<PathBuf>,
+    /// Per-project summaries shown in a recursive preview.
+    pub projects: Vec<ProjectPreview>,
+}
+
+/// Project summary shown in a recursive-clean confirmation.
+#[derive(Debug, Clone)]
+pub struct ProjectPreview {
+    pub path: PathBuf,
+    pub display_name: String,
+    pub artifact_count: usize,
+    pub artifact_size: u64,
+}
+
+fn detector_registry(config: &CleanerConfig) -> DetectorRegistry {
+    let types: Vec<&str> = config.project_types.iter().map(String::as_str).collect();
+    DetectorRegistry::with_types(&types)
+}
+
+fn project_scan_options(config: &CleanerConfig) -> ProjectScanOptions {
+    ProjectScanOptions {
+        max_depth: config.max_depth,
+        exclude_patterns: config.exclude_patterns.clone(),
+        follow_symlinks: false,
+    }
+}
+
+fn disk_scan_options(mut options: ScanOptions, cleaner_config: &CleanerConfig) -> ScanOptions {
+    // Artifact contents are handled by the project cleaner. Walking them as
+    // ordinary disk-usage entries can dominate startup time for large Cargo,
+    // Node, Gradle, and Python projects.
+    let artifact_patterns = [
+        "**/target",
+        "**/node_modules",
+        "**/.gradle",
+        "**/build",
+        "**/bin",
+        "**/obj",
+        "**/venv",
+        "**/.venv",
+        "**/__pycache__",
+        "**/bazel-out",
+    ];
+    options
+        .exclude_patterns
+        .extend(cleaner_config.exclude_patterns.iter().cloned());
+    options
+        .exclude_patterns
+        .extend(artifact_patterns.into_iter().map(String::from));
+    options.exclude_patterns.sort();
+    options.exclude_patterns.dedup();
+    options
 }
 
 /// Main application state for the TUI.
@@ -285,6 +419,9 @@ pub struct App {
 
     /// Scanner behavior supplied by configuration.
     scan_options: ScanOptions,
+
+    /// Cleaner and project-discovery policy supplied by configuration.
+    cleaner_config: CleanerConfig,
 
     /// Scanned directory tree.
     pub tree: Option<DirEntry>,
@@ -324,6 +461,15 @@ pub struct App {
 
     /// Preview info for clean confirmation.
     pub clean_preview: Option<CleanPreview>,
+
+    /// Whether a fresh recursive-clean discovery is running.
+    pub recursive_preview_running: bool,
+
+    recursive_preview_receiver: Option<Receiver<Vec<DetectedProject>>>,
+    #[allow(dead_code)]
+    recursive_preview_thread: Option<JoinHandle<()>>,
+    recursive_preview_cancel: Option<Arc<AtomicBool>>,
+    pending_recursive_projects: Option<Vec<DetectedProject>>,
 
     /// Entry captured when a destructive confirmation dialog is opened.
     /// This prevents background scan updates from changing the action target.
@@ -365,14 +511,28 @@ pub struct App {
 impl App {
     /// Create a new App instance.
     pub fn new(root: PathBuf) -> Self {
-        Self::with_scan_options(root, ScanOptions::default().with_one_file_system(true))
+        Self::with_options(
+            root,
+            ScanOptions::default().with_one_file_system(true),
+            CleanerConfig::default(),
+        )
     }
 
     /// Create an App with explicit scanner configuration.
     pub fn with_scan_options(root: PathBuf, scan_options: ScanOptions) -> Self {
+        Self::with_options(root, scan_options, CleanerConfig::default())
+    }
+
+    /// Create an App with explicit scanner and cleaner configuration.
+    pub fn with_options(
+        root: PathBuf,
+        scan_options: ScanOptions,
+        cleaner_config: CleanerConfig,
+    ) -> Self {
         Self {
             root,
             scan_options,
+            cleaner_config,
             tree: None,
             visible_entries: Vec::new(),
             selected: 0,
@@ -386,6 +546,11 @@ impl App {
             post_operation_message: None,
             scanning: false,
             clean_preview: None,
+            recursive_preview_running: false,
+            recursive_preview_receiver: None,
+            recursive_preview_thread: None,
+            recursive_preview_cancel: None,
+            pending_recursive_projects: None,
             confirmation_target: None,
             system_resources: Vec::new(),
             detect_system: false,
@@ -498,8 +663,20 @@ impl App {
         false
     }
 
-    fn discover_projects(root: &Path) -> Vec<DetectedProject> {
-        ProjectScanner::new(DetectorRegistry::new(), ProjectScanOptions::default()).scan(root)
+    fn discover_projects(root: &Path, cleaner_config: &CleanerConfig) -> Vec<DetectedProject> {
+        ProjectScanner::new(
+            detector_registry(cleaner_config),
+            project_scan_options(cleaner_config),
+        )
+        .scan(root)
+    }
+
+    fn discover_projects_fast(root: &Path, cleaner_config: &CleanerConfig) -> Vec<DetectedProject> {
+        ProjectScanner::new(
+            detector_registry(cleaner_config),
+            project_scan_options(cleaner_config),
+        )
+        .scan_fast(root)
     }
 
     fn set_detected_projects(&mut self, projects: Vec<DetectedProject>) {
@@ -510,7 +687,7 @@ impl App {
     }
 
     fn refresh_projects_blocking(&mut self) {
-        let projects = Self::discover_projects(&self.root);
+        let projects = Self::discover_projects(&self.root, &self.cleaner_config);
         self.set_detected_projects(projects);
     }
 
@@ -520,11 +697,12 @@ impl App {
         self.project_thread = None;
 
         let root = self.root.clone();
+        let cleaner_config = self.cleaner_config.clone();
         let (tx, rx) = mpsc::channel();
         self.project_receiver = Some(rx);
         self.project_detection_running = true;
         self.project_thread = Some(thread::spawn(move || {
-            let _ = tx.send(Self::discover_projects(&root));
+            let _ = tx.send(Self::discover_projects_fast(&root, &cleaner_config));
         }));
     }
 
@@ -542,6 +720,139 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// Start a fresh project discovery for the selected directory.
+    pub fn start_recursive_clean_preview(&mut self) {
+        if self.recursive_preview_running {
+            return;
+        }
+        if self.operation.is_some() {
+            self.status_message = Some("Another operation is already running".to_string());
+            return;
+        }
+
+        let Some(entry) = self.selected_entry().cloned() else {
+            self.status_message = Some("No directory selected".to_string());
+            return;
+        };
+        if entry.is_separator || entry.system_resource.is_some() || !entry.entry.is_dir {
+            self.status_message = Some("Select a directory for recursive cleanup".to_string());
+            return;
+        }
+
+        let path = entry.entry.path.clone();
+        self.confirmation_target = Some(entry);
+        let cleaner_config = self.cleaner_config.clone();
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        self.recursive_preview_receiver = Some(rx);
+        self.recursive_preview_cancel = Some(cancel);
+        self.recursive_preview_running = true;
+        self.pending_recursive_projects = None;
+        self.clean_preview = None;
+        self.status_message = Some(format!("Discovering projects under {}...", path.display()));
+        self.recursive_preview_thread = Some(thread::spawn(move || {
+            if worker_cancel.load(Ordering::Acquire) || !path.is_dir() {
+                let _ = tx.send(Vec::new());
+                return;
+            }
+            let projects = ProjectScanner::new(
+                detector_registry(&cleaner_config),
+                project_scan_options(&cleaner_config),
+            )
+            .scan(&path);
+            if !worker_cancel.load(Ordering::Acquire) {
+                let _ = tx.send(projects);
+            }
+        }));
+    }
+
+    fn poll_recursive_clean_preview(&mut self) -> bool {
+        let projects = self
+            .recursive_preview_receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(projects) = projects else {
+            return false;
+        };
+
+        self.recursive_preview_running = false;
+        self.recursive_preview_receiver = None;
+        self.recursive_preview_thread = None;
+        self.recursive_preview_cancel = None;
+
+        let Some(target) = self.confirmation_target.clone() else {
+            return true;
+        };
+        let scope = target.entry.path.clone();
+        let mut projects: Vec<_> = ProjectScanner::filter_by_age(
+            projects
+                .into_iter()
+                .filter(|project| project.path == scope || project.path.starts_with(&scope))
+                .filter(|project| !project.artifact_paths.is_empty())
+                .collect(),
+            self.cleaner_config.min_age_days as u64,
+        );
+        projects.sort_by(|a, b| a.path.cmp(&b.path));
+
+        if projects.is_empty() {
+            self.pending_recursive_projects = None;
+            self.clean_preview = None;
+            self.confirmation_target = None;
+            self.status_message = Some("No cleanable projects found".to_string());
+            return true;
+        }
+
+        let project_previews = projects
+            .iter()
+            .map(|project| ProjectPreview {
+                path: project.path.clone(),
+                display_name: project.display_name.clone(),
+                artifact_count: project.artifact_paths.len(),
+                artifact_size: project.artifact_size,
+            })
+            .collect();
+        let total_size = projects.iter().map(|project| project.artifact_size).sum();
+        self.clean_preview = Some(CleanPreview {
+            project_name: scope.display().to_string(),
+            artifacts: Vec::new(),
+            total_size,
+            recursive: true,
+            scope_path: Some(scope),
+            projects: project_previews,
+        });
+        self.pending_recursive_projects = Some(projects);
+        self.confirmation_target = Some(target);
+        self.mode = Mode::Confirm(ConfirmAction::CleanRecursive);
+        true
+    }
+
+    /// Cancel a recursive-clean preview discovery.
+    pub fn cancel_recursive_clean_preview(&mut self) {
+        if self.recursive_preview_running {
+            if let Some(cancel) = &self.recursive_preview_cancel {
+                cancel.store(true, Ordering::Release);
+            }
+            self.recursive_preview_receiver = None;
+            self.recursive_preview_thread = None;
+            self.recursive_preview_cancel = None;
+            self.recursive_preview_running = false;
+            self.status_message = Some("Recursive cleanup preview cancelled".to_string());
+        }
+    }
+
+    /// Discard a prepared recursive-clean batch without touching the files.
+    pub fn clear_recursive_clean_preview(&mut self) {
+        self.pending_recursive_projects = None;
+        if self
+            .clean_preview
+            .as_ref()
+            .is_some_and(|preview| preview.recursive)
+        {
+            self.clean_preview = None;
+        }
     }
 
     fn apply_tree_patch(entry: &mut DirEntry, patch: &TreePatch) -> bool {
@@ -812,7 +1123,7 @@ impl App {
         self.scan_receiver = Some(rx);
 
         let root = self.root.clone();
-        let mut options = self.scan_options.clone();
+        let mut options = disk_scan_options(self.scan_options.clone(), &self.cleaner_config);
         options.include_hidden = true;
 
         // Spawn background thread for progressive scanning
@@ -894,7 +1205,8 @@ impl App {
         let scan = self.poll_scan_result();
         let system = self.poll_system_detection();
         let projects = self.poll_project_detection();
-        operation || scan || system || projects
+        let recursive_preview = self.poll_recursive_clean_preview();
+        operation || scan || system || projects || recursive_preview
     }
 
     /// Return the active destructive/cleanup operation, if any.
@@ -975,6 +1287,7 @@ impl App {
             self.project_thread = None;
             self.project_detection_running = false;
         }
+        self.cancel_recursive_clean_preview();
     }
 
     /// Trigger a rescan of the root directory (blocking version for tests).
@@ -986,7 +1299,7 @@ impl App {
         self.detect_system_resources();
 
         // Always scan with hidden files included so we can toggle visibility in the UI
-        let mut options = self.scan_options.clone();
+        let mut options = disk_scan_options(self.scan_options.clone(), &self.cleaner_config);
         options.include_hidden = true;
         match scan_directory(&self.root, &options) {
             Ok(tree) => {
@@ -1114,13 +1427,54 @@ impl App {
             self.status_message = Some("Not a recognized project".to_string());
             return;
         };
+        if ProjectScanner::filter_by_age(
+            vec![project.clone()],
+            self.cleaner_config.min_age_days as u64,
+        )
+        .is_empty()
+        {
+            self.status_message = Some("Project is not old enough to clean".to_string());
+            return;
+        }
         let mut scan_options = self.scan_options.clone();
         scan_options.include_hidden = true;
         self.start_operation(
             OperationKind::Clean,
             format!("Cleaning {}...", path.display()),
-            move |cancel| clean_project(project, scan_options, cancel),
+            {
+                let cleaner_config = self.cleaner_config.clone();
+                move |cancel| clean_project(project, scan_options, cleaner_config, cancel)
+            },
         );
+    }
+
+    /// Clean all eligible projects discovered below the captured directory.
+    pub fn clean_recursive_selected(&mut self) {
+        if self.operation.is_some() {
+            self.status_message = Some("Another operation is already running".to_string());
+            return;
+        }
+        let Some(projects) = self.pending_recursive_projects.take() else {
+            self.status_message = Some("No recursive cleanup preview available".to_string());
+            return;
+        };
+        let scope = self
+            .clean_preview
+            .as_ref()
+            .and_then(|preview| preview.scope_path.clone())
+            .or_else(|| self.action_target().map(|entry| entry.entry.path.clone()));
+        let Some(scope) = scope else {
+            self.status_message = Some("No directory selected".to_string());
+            return;
+        };
+        let cleaner_config = self.cleaner_config.clone();
+        let project_count = projects.len();
+        self.start_operation(
+            OperationKind::CleanRecursive,
+            format!("Cleaning {} projects...", project_count),
+            move |cancel| clean_projects(projects, scope, cleaner_config, cancel),
+        );
+        self.clean_preview = None;
     }
 
     /// Check if the selected entry is a cleanable project or system resource.
@@ -1164,6 +1518,9 @@ impl App {
                 project_name: resource.display_name.clone(),
                 artifacts: vec![(item_info, resource.size)],
                 total_size: resource.size,
+                recursive: false,
+                scope_path: None,
+                projects: Vec::new(),
             });
             return true;
         }
@@ -1174,12 +1531,21 @@ impl App {
             self.status_message = Some("Not a recognized project".to_string());
             return false;
         };
+        if ProjectScanner::filter_by_age(
+            vec![project.clone()],
+            self.cleaner_config.min_age_days as u64,
+        )
+        .is_empty()
+        {
+            self.status_message = Some("Project is not old enough to clean".to_string());
+            return false;
+        }
         if project.artifact_paths.is_empty() {
             self.status_message = Some("No artifacts to clean".to_string());
             return false;
         }
 
-        let artifacts = project
+        let artifacts: Vec<(String, u64)> = project
             .artifact_paths
             .iter()
             .map(|artifact_path| {
@@ -1190,10 +1556,19 @@ impl App {
                 (name, dir_size(artifact_path))
             })
             .collect();
+        let total_size = artifacts.iter().map(|(_, size)| *size).sum();
         self.clean_preview = Some(CleanPreview {
             project_name: project.display_name.clone(),
             artifacts,
-            total_size: project.artifact_size,
+            total_size,
+            recursive: false,
+            scope_path: None,
+            projects: vec![ProjectPreview {
+                path: project.path.clone(),
+                display_name: project.display_name.clone(),
+                artifact_count: project.artifact_paths.len(),
+                artifact_size: total_size,
+            }],
         });
         true
     }
@@ -1681,6 +2056,16 @@ mod tests {
 
     // Clean tests
 
+    fn app_for_cleaning(root: PathBuf) -> App {
+        let mut cleaner = CleanerConfig::default();
+        cleaner.min_age_days = 0;
+        App::with_options(
+            root,
+            ScanOptions::default().with_one_file_system(true),
+            cleaner,
+        )
+    }
+
     #[test]
     fn test_clean_selected_no_entry() {
         let mut app = App::new(PathBuf::from("/"));
@@ -1693,7 +2078,7 @@ mod tests {
     #[test]
     fn test_clean_selected_not_a_project() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut app = App::new(temp_dir.path().to_path_buf());
+        let mut app = app_for_cleaning(temp_dir.path().to_path_buf());
         app.initial_scan();
 
         app.clean_selected();
@@ -1716,7 +2101,7 @@ mod tests {
         fs::create_dir(&target_dir).unwrap();
         fs::write(target_dir.join("artifact.bin"), "x".repeat(1000)).unwrap();
 
-        let mut app = App::new(temp_dir.path().to_path_buf());
+        let mut app = app_for_cleaning(temp_dir.path().to_path_buf());
         app.initial_scan();
 
         assert!(target_dir.exists());
@@ -1746,7 +2131,7 @@ mod tests {
         // Create a cargo project structure without target directory
         fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let mut app = App::new(temp_dir.path().to_path_buf());
+        let mut app = app_for_cleaning(temp_dir.path().to_path_buf());
         app.initial_scan();
 
         app.clean_selected();

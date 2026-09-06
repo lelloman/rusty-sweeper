@@ -11,6 +11,7 @@ use std::io::{self, stdout, Stdout};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::config::CleanerConfig;
 use event::handle_events;
 use ui::render;
 
@@ -25,9 +26,10 @@ use ratatui::prelude::*;
 /// This is the main entry point for the TUI. It initializes the terminal,
 /// performs an initial scan, and enters the main event loop.
 pub fn run(root: PathBuf) -> anyhow::Result<()> {
-    run_with_scan_options(
+    run_with_options(
         root,
         crate::scanner::ScanOptions::default().with_one_file_system(true),
+        CleanerConfig::default(),
     )
 }
 
@@ -36,12 +38,21 @@ pub fn run_with_scan_options(
     root: PathBuf,
     scan_options: crate::scanner::ScanOptions,
 ) -> anyhow::Result<()> {
+    run_with_options(root, scan_options, CleanerConfig::default())
+}
+
+/// Run the TUI with explicit scanner and cleaner configuration.
+pub fn run_with_options(
+    root: PathBuf,
+    scan_options: crate::scanner::ScanOptions,
+    cleaner_config: CleanerConfig,
+) -> anyhow::Result<()> {
     // Setup
     install_panic_hook();
     let mut terminal = init_terminal()?;
 
     // Initialize app and start background scan
-    let mut app = App::with_scan_options(root, scan_options);
+    let mut app = App::with_options(root, scan_options, cleaner_config);
     app.detect_system = true;
     app.start_initial_scan();
 

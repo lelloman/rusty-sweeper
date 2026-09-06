@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added recursive subtree cleanup from the TUI with aggregate preview, configured project filtering, and batch results.
+
 ## [0.3.0] - 2026-08-31
 
 ### Added
