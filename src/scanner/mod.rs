@@ -12,3 +12,5 @@ pub use formatter::{
 pub use options::{ScanCacheOptions, ScanOptions};
 pub use size::format_size;
 pub use walker::{scan_directory, scan_directory_parallel, scan_directory_progressive, ScanUpdate};
+
+pub(crate) use walker::scan_directory_progressive_notifying;

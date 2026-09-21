@@ -549,6 +549,7 @@ fn test_tui_toggle_hidden() {
     fs::create_dir(temp.path().join("visible")).unwrap();
 
     let mut app = App::new(temp.path().to_path_buf());
+    app.show_hidden = false;
     app.initial_scan();
 
     // Initially hidden files are not shown

@@ -41,7 +41,7 @@ fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         .unwrap_or_else(|| "...".to_string());
 
     // Get disk usage info
-    let disk_info = app.get_disk_usage().map(|(total, used, avail)| {
+    let disk_info = app.cached_disk_usage.map(|(total, used, avail)| {
         let total_str = humansize::format_size(total, humansize::BINARY);
         let used_str = humansize::format_size(used, humansize::BINARY);
         let avail_str = humansize::format_size(avail, humansize::BINARY);

@@ -106,6 +106,12 @@ large_dir_threshold = 1073741824
 
 ## TUI Keybindings
 
+Scanning and cleanup run in background workers. The UI processes queued scan
+results in batches and redraws changed frames at most 60 times per second;
+keyboard input and terminal resizing are handled independently. Deleting an
+entry updates the in-memory tree without rescanning the root. Press `r` to
+refresh changes made outside the application.
+
 | Key | Action |
 |-----|--------|
 | `j` / `Down` | Move down |

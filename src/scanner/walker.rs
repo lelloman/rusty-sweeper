@@ -485,11 +485,28 @@ fn scan_dir_recursive_parallel(
 /// Scans top-level entries sequentially, sending a tree update after each completes.
 /// Each individual entry is scanned in parallel internally for speed.
 pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender<ScanUpdate>) {
+    scan_directory_progressive_notifying(root, options, tx, || {});
+}
+
+/// Progressive scan with a notification after each successfully queued update.
+pub(crate) fn scan_directory_progressive_notifying(
+    root: &Path,
+    options: &ScanOptions,
+    tx: Sender<ScanUpdate>,
+    notify: impl Fn(),
+) {
+    let send = |update| {
+        let result = tx.send(update).map_err(|_| ());
+        if result.is_ok() {
+            notify();
+        }
+        result
+    };
     let cache = MetadataCache::load(options.cache.as_ref());
     let thread_pool = match configured_thread_pool(options) {
         Ok(pool) => pool,
         Err(error) => {
-            let _ = tx.send(ScanUpdate::Error {
+            let _ = send(ScanUpdate::Error {
                 message: error.to_string(),
             });
             return;
@@ -499,7 +516,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     let root = match root.canonicalize() {
         Ok(r) => r,
         Err(e) => {
-            let _ = tx.send(ScanUpdate::Error {
+            let _ = send(ScanUpdate::Error {
                 message: format!("Cannot access path: {}", e),
             });
             return;
@@ -509,7 +526,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     let metadata = match fs::metadata(&root) {
         Ok(m) => m,
         Err(e) => {
-            let _ = tx.send(ScanUpdate::Error {
+            let _ = send(ScanUpdate::Error {
                 message: format!("Cannot read root: {}", e),
             });
             return;
@@ -535,7 +552,7 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
     let read_dir = match fs::read_dir(&root) {
         Ok(rd) => rd,
         Err(e) => {
-            let _ = tx.send(ScanUpdate::Error {
+            let _ = send(ScanUpdate::Error {
                 message: format!("Cannot read directory: {}", e),
             });
             return;
@@ -550,12 +567,11 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
 
     let total = entries.len();
     let root_entry = DirEntry::new_dir(root.clone(), metadata.modified().ok());
-    if tx
-        .send(ScanUpdate::Started {
-            root: root_entry,
-            total,
-        })
-        .is_err()
+    if send(ScanUpdate::Started {
+        root: root_entry,
+        total,
+    })
+    .is_err()
     {
         return;
     }
@@ -585,20 +601,19 @@ pub fn scan_directory_progressive(root: &Path, options: &ScanOptions, tx: Sender
             Ok(e) => e,
             Err(_) => DirEntry::new_error(child_path.clone(), "Scan failed".to_string()),
         };
-        if tx
-            .send(ScanUpdate::Entry {
-                entry: child_entry,
-                completed: idx + 1,
-                total,
-            })
-            .is_err()
+        if send(ScanUpdate::Entry {
+            entry: child_entry,
+            completed: idx + 1,
+            total,
+        })
+        .is_err()
         {
             return;
         }
     }
 
     cache.save();
-    let _ = tx.send(ScanUpdate::Complete);
+    let _ = send(ScanUpdate::Complete);
 }
 
 #[cfg(test)]
@@ -900,6 +915,24 @@ mod tests {
                 .len(),
             expected_entries
         );
+    }
+
+    #[test]
+    fn test_progressive_scan_notifies_after_updates_are_available() {
+        let dir = create_test_structure();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let received = std::cell::RefCell::new(Vec::new());
+        scan_directory_progressive_notifying(dir.path(), &ScanOptions::new(), tx, || {
+            received
+                .borrow_mut()
+                .push(rx.try_recv().expect("notification must follow publication"));
+        });
+        let updates = received.into_inner();
+        assert!(matches!(updates.first(), Some(ScanUpdate::Started { .. })));
+        assert!(matches!(updates.last(), Some(ScanUpdate::Complete)));
+        assert!(updates
+            .iter()
+            .any(|update| matches!(update, ScanUpdate::Entry { .. })));
     }
 
     // Parallel scanner tests

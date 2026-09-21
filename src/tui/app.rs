@@ -16,7 +16,7 @@ use crate::cleaner::{
 };
 use crate::config::CleanerConfig;
 use crate::scanner::{
-    scan_directory, scan_directory_progressive, DirEntry, ScanOptions, ScanUpdate,
+    scan_directory, scan_directory_progressive_notifying, DirEntry, ScanOptions, ScanUpdate,
 };
 use walkdir::WalkDir;
 
@@ -57,11 +57,35 @@ struct OperationState {
     cancel: Arc<AtomicBool>,
 }
 
+struct WakeOnDrop(Option<thread::Thread>);
+
+impl WakeOnDrop {
+    fn notify(&self) {
+        if let Some(thread) = &self.0 {
+            thread.unpark();
+        }
+    }
+}
+
+impl Drop for WakeOnDrop {
+    fn drop(&mut self) {
+        self.notify();
+    }
+}
+
+fn receive_worker<T>(receiver: &Option<Receiver<T>>) -> Option<Result<T, mpsc::TryRecvError>> {
+    match receiver.as_ref()?.try_recv() {
+        Err(mpsc::TryRecvError::Empty) => None,
+        result => Some(result),
+    }
+}
+
 struct OperationOutcome {
     message: String,
     rescan: bool,
     refresh_system_resources: bool,
     project_refresh: Option<ProjectRefresh>,
+    deletion_patch: Option<TreePatch>,
 }
 
 struct ProjectRefresh {
@@ -118,6 +142,7 @@ fn cancelled_outcome(action: &str) -> OperationOutcome {
         rescan: false,
         refresh_system_resources: false,
         project_refresh: None,
+        deletion_patch: None,
     }
 }
 
@@ -174,6 +199,7 @@ fn clean_project(
             rescan: false,
             refresh_system_resources: false,
             project_refresh: None,
+            deletion_patch: None,
         };
     }
     if cancel.load(Ordering::Acquire) {
@@ -217,6 +243,7 @@ fn clean_project(
         rescan: false,
         refresh_system_resources: false,
         project_refresh,
+        deletion_patch: None,
     }
 }
 
@@ -247,6 +274,7 @@ fn clean_projects(
             rescan: false,
             refresh_system_resources: false,
             project_refresh: None,
+            deletion_patch: None,
         };
     }
 
@@ -297,6 +325,7 @@ fn clean_projects(
         rescan: true,
         refresh_system_resources: false,
         project_refresh: None,
+        deletion_patch: None,
     }
 }
 
@@ -316,6 +345,7 @@ fn clean_system_resource(
             rescan: false,
             refresh_system_resources: false,
             project_refresh: None,
+            deletion_patch: None,
         };
     };
 
@@ -329,18 +359,21 @@ fn clean_system_resource(
             rescan: false,
             refresh_system_resources: true,
             project_refresh: None,
+            deletion_patch: None,
         },
         SystemCleanResult::Failed { error, .. } => OperationOutcome {
             message: format!("Clean failed: {}", error),
             rescan: false,
             refresh_system_resources: false,
             project_refresh: None,
+            deletion_patch: None,
         },
         SystemCleanResult::Skipped { reason, .. } => OperationOutcome {
             message: format!("Clean skipped: {}", reason),
             rescan: false,
             refresh_system_resources: false,
             project_refresh: None,
+            deletion_patch: None,
         },
     }
 }
@@ -439,6 +472,16 @@ pub struct App {
     /// Action result retained while its automatic rescan is in progress.
     post_operation_message: Option<String>,
 
+    // Workers wake the UI thread after publishing results. Tests may poll directly.
+    wakeup: Option<thread::Thread>,
+    defer_view_updates: bool,
+    view_dirty: bool,
+    pub(crate) cached_disk_usage: Option<(u64, u64, u64)>,
+    disk_usage_receiver: Option<Receiver<Option<(u64, u64, u64)>>>,
+
+    // Reapply local deletions to results from an overlapping scan.
+    deletion_patches: Vec<TreePatch>,
+
     /// Is currently scanning.
     pub scanning: bool,
 
@@ -492,6 +535,21 @@ pub struct App {
 }
 
 impl App {
+    pub(crate) fn attach_ui_thread(&mut self) {
+        self.wakeup = Some(thread::current());
+        self.defer_view_updates = true;
+    }
+
+    /// Materialize the visible rows only when input or a frame needs them.
+    pub(crate) fn flush_view_updates(&mut self) {
+        if self.view_dirty {
+            let deferred = self.defer_view_updates;
+            self.defer_view_updates = false;
+            self.rebuild_visible_entries();
+            self.defer_view_updates = deferred;
+        }
+    }
+
     /// Create a new App instance.
     pub fn new(root: PathBuf) -> Self {
         Self::with_options(
@@ -527,6 +585,12 @@ impl App {
             should_quit: false,
             status_message: None,
             post_operation_message: None,
+            deletion_patches: Vec::new(),
+            wakeup: None,
+            defer_view_updates: false,
+            view_dirty: false,
+            cached_disk_usage: None,
+            disk_usage_receiver: None,
             scanning: false,
             clean_preview: None,
             recursive_preview_running: false,
@@ -567,6 +631,12 @@ impl App {
 
     /// Rebuild the visible_entries list from the tree based on expansion state.
     pub fn rebuild_visible_entries(&mut self) {
+        self.view_dirty = true;
+        if self.defer_view_updates {
+            return;
+        }
+        self.view_dirty = false;
+        let selected_path = self.selected_entry().map(|entry| entry.entry.path.clone());
         self.visible_entries.clear();
 
         // Prepend system resources (if any) before the directory tree
@@ -601,6 +671,13 @@ impl App {
             self.tree = Some(tree);
         }
 
+        if let Some(index) = self
+            .visible_entries
+            .iter()
+            .position(|entry| selected_path.as_ref() == Some(&entry.entry.path))
+        {
+            self.selected = index;
+        }
         // Ensure selection is valid
         if !self.visible_entries.is_empty() && self.selected >= self.visible_entries.len() {
             self.selected = self.visible_entries.len() - 1;
@@ -624,26 +701,30 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.system_receiver = Some(rx);
         self.system_detection_running = true;
+        let wakeup = self.wakeup.clone();
         self.system_thread = Some(thread::spawn(move || {
+            let _wake = WakeOnDrop(wakeup);
+            let result_sender = tx;
             let resources = SystemCleanerRegistry::new().detect_all();
-            let _ = tx.send(resources);
+            let _ = result_sender.send(resources);
         }));
     }
 
     fn poll_system_detection(&mut self) -> bool {
-        let resources = self
-            .system_receiver
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        if let Some(resources) = resources {
-            self.system_resources = resources;
-            self.system_detection_running = false;
-            self.system_receiver = None;
-            self.system_thread = None;
-            self.rebuild_visible_entries();
-            return true;
+        let Some(result) = receive_worker(&self.system_receiver) else {
+            return false;
+        };
+        self.system_detection_running = false;
+        self.system_receiver = None;
+        self.system_thread = None;
+        match result {
+            Ok(resources) => {
+                self.system_resources = resources;
+                self.rebuild_visible_entries();
+            }
+            Err(_) => self.status_message = Some("System discovery worker stopped".into()),
         }
-        false
+        true
     }
 
     fn discover_projects(root: &Path, cleaner_config: &CleanerConfig) -> Vec<DetectedProject> {
@@ -667,6 +748,55 @@ impl App {
             .into_iter()
             .map(|project| (project.path.clone(), project))
             .collect();
+        self.refresh_projects_after_deletions();
+    }
+
+    fn refresh_projects_after_deletions(&mut self) {
+        let registry = detector_registry(&self.cleaner_config);
+        self.detected_projects.retain(|path, project| {
+            if self
+                .deletion_patches
+                .iter()
+                .any(|patch| patch.replacement.is_none() && path.starts_with(&patch.path))
+            {
+                return false;
+            }
+            if self
+                .deletion_patches
+                .iter()
+                .any(|patch| patch.path.starts_with(path))
+            {
+                let Some(detector) = registry.get(&project.project_type) else {
+                    return false;
+                };
+                if !detector.detect(path) {
+                    return false;
+                }
+                project.artifact_paths = detector.find_artifacts(path);
+                project.artifact_size = project
+                    .artifact_paths
+                    .iter()
+                    .filter_map(|artifact| {
+                        self.tree
+                            .as_ref()
+                            .and_then(|tree| Self::tree_entry(tree, artifact))
+                    })
+                    .map(|entry| entry.size)
+                    .sum();
+            }
+            true
+        });
+    }
+
+    fn tree_entry<'a>(entry: &'a DirEntry, path: &Path) -> Option<&'a DirEntry> {
+        if entry.path == path {
+            return Some(entry);
+        }
+        entry
+            .children
+            .iter()
+            .find(|child| path.starts_with(&child.path))
+            .and_then(|child| Self::tree_entry(child, path))
     }
 
     fn refresh_projects_blocking(&mut self) {
@@ -684,25 +814,29 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.project_receiver = Some(rx);
         self.project_detection_running = true;
+        let wakeup = self.wakeup.clone();
         self.project_thread = Some(thread::spawn(move || {
-            let _ = tx.send(Self::discover_projects_fast(&root, &cleaner_config));
+            let _wake = WakeOnDrop(wakeup);
+            let result_sender = tx;
+            let _ = result_sender.send(Self::discover_projects_fast(&root, &cleaner_config));
         }));
     }
 
     fn poll_project_detection(&mut self) -> bool {
-        let projects = self
-            .project_receiver
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        if let Some(projects) = projects {
-            self.set_detected_projects(projects);
-            self.project_detection_running = false;
-            self.project_receiver = None;
-            self.project_thread = None;
-            self.rebuild_visible_entries();
-            return true;
+        let Some(result) = receive_worker(&self.project_receiver) else {
+            return false;
+        };
+        self.project_detection_running = false;
+        self.project_receiver = None;
+        self.project_thread = None;
+        match result {
+            Ok(projects) => {
+                self.set_detected_projects(projects);
+                self.rebuild_visible_entries();
+            }
+            Err(_) => self.status_message = Some("Project discovery worker stopped".into()),
         }
-        false
+        true
     }
 
     /// Start a fresh project discovery for the selected directory.
@@ -736,9 +870,12 @@ impl App {
         self.pending_recursive_projects = None;
         self.clean_preview = None;
         self.status_message = Some(format!("Discovering projects under {}...", path.display()));
+        let wakeup = self.wakeup.clone();
         self.recursive_preview_thread = Some(thread::spawn(move || {
+            let _wake = WakeOnDrop(wakeup);
+            let result_sender = tx;
             if worker_cancel.load(Ordering::Acquire) || !path.is_dir() {
-                let _ = tx.send(Vec::new());
+                let _ = result_sender.send(Vec::new());
                 return;
             }
             let projects = ProjectScanner::new(
@@ -746,18 +883,16 @@ impl App {
                 project_scan_options(&cleaner_config),
             )
             .scan(&path);
+            let projects =
+                ProjectScanner::filter_by_age(projects, cleaner_config.min_age_days as u64);
             if !worker_cancel.load(Ordering::Acquire) {
-                let _ = tx.send(projects);
+                let _ = result_sender.send(projects);
             }
         }));
     }
 
     fn poll_recursive_clean_preview(&mut self) -> bool {
-        let projects = self
-            .recursive_preview_receiver
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some(projects) = projects else {
+        let Some(result) = receive_worker(&self.recursive_preview_receiver) else {
             return false;
         };
 
@@ -765,19 +900,21 @@ impl App {
         self.recursive_preview_receiver = None;
         self.recursive_preview_thread = None;
         self.recursive_preview_cancel = None;
+        let Ok(projects) = result else {
+            self.status_message = Some("Cleanup discovery worker stopped".into());
+            self.confirmation_target = None;
+            return true;
+        };
 
         let Some(target) = self.confirmation_target.clone() else {
             return true;
         };
         let scope = target.entry.path.clone();
-        let mut projects: Vec<_> = ProjectScanner::filter_by_age(
-            projects
-                .into_iter()
-                .filter(|project| project.path == scope || project.path.starts_with(&scope))
-                .filter(|project| !project.artifact_paths.is_empty())
-                .collect(),
-            self.cleaner_config.min_age_days as u64,
-        );
+        let mut projects: Vec<_> = projects
+            .into_iter()
+            .filter(|project| project.path == scope || project.path.starts_with(&scope))
+            .filter(|project| !project.artifact_paths.is_empty())
+            .collect();
         projects.sort_by(|a, b| a.path.cmp(&b.path));
 
         if projects.is_empty() {
@@ -895,6 +1032,36 @@ impl App {
         }) {
             self.selected = index;
         }
+    }
+
+    fn apply_deletion_patch(&mut self, patch: TreePatch) {
+        let selected_path = self.selected_entry().map(|entry| entry.entry.path.clone());
+        if let Some(tree) = &mut self.tree {
+            Self::apply_tree_patch(tree, &patch);
+        }
+        if patch.replacement.is_none() {
+            self.expanded.retain(|path| !path.starts_with(&patch.path));
+        }
+        self.deletion_patches.push(patch);
+        self.refresh_projects_after_deletions();
+        self.rebuild_visible_entries();
+        if let Some(index) = self
+            .visible_entries
+            .iter()
+            .position(|entry| selected_path.as_ref() == Some(&entry.entry.path))
+        {
+            self.selected = index;
+        }
+    }
+
+    fn patch_scan_entry(&self, entry: &mut DirEntry) -> bool {
+        for patch in &self.deletion_patches {
+            if patch.replacement.is_none() && entry.path.starts_with(&patch.path) {
+                return false;
+            }
+            Self::apply_tree_patch(entry, patch);
+        }
+        true
     }
 
     /// Recursively flatten the tree into visible_entries.
@@ -1093,6 +1260,8 @@ impl App {
             return;
         }
 
+        self.deletion_patches.clear();
+
         // Docker/system queries have their own worker so process startup cannot
         // stall terminal rendering.
         self.start_system_detection();
@@ -1110,8 +1279,10 @@ impl App {
         options.include_hidden = true;
 
         // Spawn background thread for progressive scanning
+        let wakeup = self.wakeup.clone();
         let handle = thread::spawn(move || {
-            scan_directory_progressive(&root, &options, tx);
+            let wake = WakeOnDrop(wakeup);
+            scan_directory_progressive_notifying(&root, &options, tx, || wake.notify());
         });
 
         self.scan_thread = Some(handle);
@@ -1120,33 +1291,44 @@ impl App {
     /// Poll for scan updates from the background thread.
     /// Returns true if an update was received and processed.
     pub fn poll_scan_result(&mut self) -> bool {
-        let update = if let Some(ref rx) = self.scan_receiver {
-            rx.try_recv().ok()
-        } else {
-            None
-        };
-
-        if let Some(scan_update) = update {
+        const MAX_UPDATES: usize = 256;
+        let mut processed = 0;
+        while processed < MAX_UPDATES {
+            let Some(receiver) = &self.scan_receiver else {
+                break;
+            };
+            let scan_update = match receiver.try_recv() {
+                Ok(update) => update,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => ScanUpdate::Error {
+                    message: "Scanner stopped before completing".into(),
+                },
+            };
+            processed += 1;
             match scan_update {
-                ScanUpdate::Started { root, total } => {
+                ScanUpdate::Started { mut root, total } => {
+                    self.patch_scan_entry(&mut root);
                     self.tree = Some(root);
-                    self.rebuild_visible_entries();
                     if self.post_operation_message.is_none() {
                         self.status_message = Some(format!("Scanning 0/{}", total));
                     }
                 }
                 ScanUpdate::Entry {
-                    entry,
+                    mut entry,
                     completed,
                     total,
                 } => {
                     let name = entry.name.clone();
+                    let keep = self.patch_scan_entry(&mut entry);
                     if let Some(tree) = &mut self.tree {
-                        tree.children.push(entry);
-                        tree.recalculate_totals();
-                        tree.sort_by_size();
+                        if keep {
+                            tree.size += entry.size;
+                            tree.disk_usage += entry.disk_usage;
+                            tree.file_count += entry.file_count;
+                            tree.dir_count += entry.dir_count + u64::from(entry.is_dir);
+                            tree.children.push(entry);
+                        }
                     }
-                    self.rebuild_visible_entries();
                     if self.post_operation_message.is_none() {
                         self.status_message =
                             Some(format!("Scanning ({}/{}) {}", completed, total, name));
@@ -1156,30 +1338,34 @@ impl App {
                     self.scanning = false;
                     self.scan_receiver = None;
                     self.scan_thread = None;
-
-                    // Preserve expanded paths that still exist
-                    let old_expanded: Vec<_> = self.expanded.iter().cloned().collect();
-                    self.expanded.clear();
-                    for path in old_expanded {
-                        if path.exists() {
-                            self.expanded.insert(path);
-                        }
+                    // Prune using the completed in-memory tree, without doing
+                    // filesystem I/O on the rendering thread.
+                    if let Some(tree) = &self.tree {
+                        self.expanded
+                            .retain(|path| Self::tree_entry(tree, path).is_some());
                     }
-
-                    self.rebuild_visible_entries();
                     self.status_message = self.post_operation_message.take();
                 }
                 ScanUpdate::Error { message } => {
                     self.scanning = false;
                     self.scan_receiver = None;
                     self.scan_thread = None;
+                    self.post_operation_message = None;
                     self.status_message = Some(format!("Scan error: {}", message));
                 }
             }
-            return true;
         }
-
-        false
+        if processed > 0 {
+            self.rebuild_visible_entries();
+        }
+        if processed == MAX_UPDATES {
+            // There may still be queued results. Yield to input/rendering,
+            // then resume without waiting for another worker notification.
+            if let Some(wakeup) = &self.wakeup {
+                wakeup.unpark();
+            }
+        }
+        processed > 0
     }
 
     /// Poll all background work performed by the TUI.
@@ -1189,7 +1375,34 @@ impl App {
         let system = self.poll_system_detection();
         let projects = self.poll_project_detection();
         let recursive_preview = self.poll_recursive_clean_preview();
-        operation || scan || system || projects || recursive_preview
+        let disk = self.poll_disk_usage();
+        operation || scan || system || projects || recursive_preview || disk
+    }
+
+    pub(crate) fn start_disk_usage_refresh(&mut self) {
+        if self.disk_usage_receiver.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.disk_usage_receiver = Some(rx);
+        let root = self.root.clone();
+        let wakeup = self.wakeup.clone();
+        thread::spawn(move || {
+            let _wake = WakeOnDrop(wakeup);
+            let result_sender = tx;
+            let _ = result_sender.send(Self::disk_usage_for(&root));
+        });
+    }
+
+    fn poll_disk_usage(&mut self) -> bool {
+        let Some(result) = receive_worker(&self.disk_usage_receiver) else {
+            return false;
+        };
+        self.disk_usage_receiver = None;
+        let usage = result.ok().flatten();
+        let changed = usage != self.cached_disk_usage;
+        self.cached_disk_usage = usage;
+        changed
     }
 
     /// Return the active destructive/cleanup operation, if any.
@@ -1222,25 +1435,28 @@ impl App {
         self.operation = Some(OperationState { kind, cancel });
         self.operation_receiver = Some(rx);
         self.status_message = Some(status);
+        let wakeup = self.wakeup.clone();
         self.operation_thread = Some(thread::spawn(move || {
+            let _wake = WakeOnDrop(wakeup);
+            let result_sender = tx;
             let outcome = work(worker_cancel);
-            let _ = tx.send(outcome);
+            let _ = result_sender.send(outcome);
         }));
     }
 
     /// Apply a completed background operation result without blocking the UI.
     pub fn poll_operation_result(&mut self) -> bool {
-        let outcome = self
-            .operation_receiver
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some(outcome) = outcome else {
+        let Some(result) = receive_worker(&self.operation_receiver) else {
             return false;
         };
 
         self.operation = None;
         self.operation_receiver = None;
         self.operation_thread = None;
+        let Ok(outcome) = result else {
+            self.status_message = Some("Cleanup worker stopped before completing".into());
+            return true;
+        };
         let message = outcome.message;
 
         if outcome.refresh_system_resources {
@@ -1248,6 +1464,12 @@ impl App {
         }
         if let Some(refresh) = outcome.project_refresh {
             self.apply_project_refresh(refresh);
+        }
+        if let Some(patch) = outcome.deletion_patch {
+            self.apply_deletion_patch(patch);
+            if self.scanning {
+                self.post_operation_message = Some(message.clone());
+            }
         }
         if outcome.rescan {
             self.post_operation_message = Some(message.clone());
@@ -1275,6 +1497,7 @@ impl App {
 
     /// Trigger a rescan of the root directory (blocking version for tests).
     pub fn trigger_rescan(&mut self) {
+        self.deletion_patches.clear();
         self.scanning = true;
         self.detected_projects.clear();
 
@@ -1348,6 +1571,11 @@ impl App {
         }
 
         let display_path = path.display().to_string();
+        let mut scan_options = self.scan_options.clone();
+        scan_options.include_hidden = true;
+        // A partial-delete refresh must not replace the full-root disk cache
+        // with entries from just this subtree.
+        scan_options.cache = None;
         self.start_operation(
             OperationKind::Delete,
             format!("Deleting: {}", display_path),
@@ -1358,21 +1586,38 @@ impl App {
                         rescan: false,
                         refresh_system_resources: false,
                         project_refresh: None,
+                        deletion_patch: None,
                     };
                 }
                 match delete_path(&path) {
                     Ok(()) => OperationOutcome {
                         message: format!("Deleted: {}", display_path),
-                        rescan: true,
-                        refresh_system_resources: false,
-                        project_refresh: None,
-                    },
-                    Err(error) => OperationOutcome {
-                        message: format!("Error: {}", error),
                         rescan: false,
                         refresh_system_resources: false,
                         project_refresh: None,
+                        deletion_patch: Some(TreePatch {
+                            path,
+                            replacement: None,
+                        }),
                     },
+                    Err(error) => {
+                        // A failed directory removal may have removed some
+                        // children. Refresh only what remains at this path.
+                        let deletion_patch =
+                            scan_directory(&path, &scan_options)
+                                .ok()
+                                .map(|entry| TreePatch {
+                                    path,
+                                    replacement: Some(entry),
+                                });
+                        OperationOutcome {
+                            message: format!("Error: {}", error),
+                            rescan: false,
+                            refresh_system_resources: false,
+                            project_refresh: None,
+                            deletion_patch,
+                        }
+                    }
                 }
             },
         );
@@ -1559,12 +1804,11 @@ impl App {
     /// Get filesystem disk usage information.
     /// Returns (total_bytes, used_bytes, available_bytes) or None if unavailable.
     pub fn get_disk_usage(&self) -> Option<(u64, u64, u64)> {
-        // Only get disk usage if the root path actually exists
-        if !self.root.exists() {
-            return None;
-        }
+        Self::disk_usage_for(&self.root)
+    }
 
-        match statvfs(&self.root) {
+    fn disk_usage_for(path: &Path) -> Option<(u64, u64, u64)> {
+        match statvfs(path) {
             Ok(stat) => {
                 let block_size = stat.fragment_size();
                 let total = stat.blocks() * block_size;
@@ -1591,6 +1835,138 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_scan_backlog_is_batched_and_view_is_built_only_when_needed() {
+        let root = PathBuf::from("/test");
+        let mut app = App::new(root.clone());
+        app.attach_ui_thread();
+        app.expanded.insert(root.clone());
+        let (tx, rx) = mpsc::channel();
+        app.scan_receiver = Some(rx);
+        app.scanning = true;
+        tx.send(ScanUpdate::Started {
+            root: DirEntry::new_dir(root.clone(), None),
+            total: 10_000,
+        })
+        .unwrap();
+        for index in 0..10_000 {
+            tx.send(ScanUpdate::Entry {
+                entry: DirEntry::new_file(root.join(format!("{index:05}")), 1, 4096, None),
+                completed: index + 1,
+                total: 10_000,
+            })
+            .unwrap();
+        }
+        tx.send(ScanUpdate::Complete).unwrap();
+        drop(tx);
+
+        assert!(app.poll_scan_result());
+        assert!(
+            app.scanning,
+            "a bounded batch must yield before draining the whole queue"
+        );
+        assert_eq!(app.tree.as_ref().unwrap().file_count, 255);
+        assert!(
+            app.visible_entries.is_empty(),
+            "result application should not rebuild rows"
+        );
+        let mut batches = 1;
+        while app.poll_scan_result() {
+            batches += 1;
+        }
+        assert_eq!(batches, 40);
+        assert!(!app.scanning);
+        let tree = app.tree.as_ref().unwrap();
+        assert_eq!(
+            (tree.size, tree.disk_usage, tree.file_count),
+            (10_000, 40_960_000, 10_000)
+        );
+        app.flush_view_updates();
+        assert_eq!(app.visible_entries.len(), 10_001);
+        assert!(!app.view_dirty);
+    }
+
+    #[test]
+    fn test_disconnected_workers_leave_no_stuck_busy_state() {
+        let mut app = App::new(PathBuf::from("/test"));
+        let (tx, rx) = mpsc::channel();
+        app.scan_receiver = Some(rx);
+        app.scanning = true;
+        drop(tx);
+        assert!(app.poll_scan_result());
+        assert!(!app.scanning);
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("Scanner stopped"));
+
+        let (tx, rx) = mpsc::channel();
+        app.operation_receiver = Some(rx);
+        app.operation = Some(OperationState {
+            kind: OperationKind::Delete,
+            cancel: Arc::new(AtomicBool::new(false)),
+        });
+        drop(tx);
+        assert!(app.poll_operation_result());
+        assert!(app.operation_kind().is_none());
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("worker stopped"));
+    }
+
+    #[test]
+    fn test_cancelled_scan_cannot_publish_into_a_new_scan() {
+        let mut app = App::new(PathBuf::from("/test"));
+        let (old_tx, rx) = mpsc::channel();
+        app.scan_receiver = Some(rx);
+        app.scanning = true;
+        app.cancel_scan();
+        assert!(old_tx.send(ScanUpdate::Complete).is_err());
+        let (tx, rx) = mpsc::channel();
+        app.scan_receiver = Some(rx);
+        app.scanning = true;
+        tx.send(ScanUpdate::Started {
+            root: DirEntry::new_dir(PathBuf::from("/test"), None),
+            total: 0,
+        })
+        .unwrap();
+        tx.send(ScanUpdate::Complete).unwrap();
+        assert!(app.poll_scan_result());
+        assert!(!app.scanning);
+        assert!(app.tree.as_ref().unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn test_deferred_view_preserves_selection_as_scan_results_arrive() {
+        let root = PathBuf::from("/test");
+        let selected = root.join("selected");
+        let mut app = App::new(root.clone());
+        let mut tree = DirEntry::new_dir(root.clone(), None);
+        tree.children
+            .push(DirEntry::new_file(selected.clone(), 1, 1, None));
+        tree.recalculate_totals();
+        app.tree = Some(tree);
+        app.expanded.insert(root.clone());
+        app.rebuild_visible_entries();
+        app.selected = 1;
+        app.attach_ui_thread();
+        let (tx, rx) = mpsc::channel();
+        app.scan_receiver = Some(rx);
+        tx.send(ScanUpdate::Entry {
+            entry: DirEntry::new_file(root.join("larger"), 100, 100, None),
+            completed: 2,
+            total: 2,
+        })
+        .unwrap();
+        assert!(app.poll_scan_result());
+        app.flush_view_updates();
+        assert_eq!(app.selected_entry().unwrap().entry.path, selected);
+        assert_eq!(app.selected, 2);
+    }
 
     #[test]
     fn test_app_new() {
@@ -1718,6 +2094,7 @@ mod tests {
     #[test]
     fn test_flatten_expanded_tree() {
         let mut app = App::new(PathBuf::from("/root"));
+        app.show_hidden = false;
         app.tree = Some(create_test_tree());
         app.expanded.insert(PathBuf::from("/root"));
         app.rebuild_visible_entries();
@@ -1750,6 +2127,7 @@ mod tests {
     #[test]
     fn test_flatten_deeply_expanded() {
         let mut app = App::new(PathBuf::from("/root"));
+        app.show_hidden = false;
         app.tree = Some(create_test_tree());
         app.expanded.insert(PathBuf::from("/root"));
         app.expanded.insert(PathBuf::from("/root/dir_a"));
@@ -1947,6 +2325,7 @@ mod tests {
     #[test]
     fn test_sort_order_affects_display() {
         let mut app = App::new(PathBuf::from("/root"));
+        app.show_hidden = false;
         app.tree = Some(create_test_tree());
         app.expanded.insert(PathBuf::from("/root"));
 
@@ -2021,9 +2400,169 @@ mod tests {
         assert_eq!(app.operation_kind(), None);
         assert!(!file_path.exists());
         assert!(
-            app.scanning,
-            "successful deletion should start an async rescan"
+            !app.scanning,
+            "successful deletion should update the existing tree"
         );
+        let tree = app.tree.as_ref().unwrap();
+        assert!(tree.children.is_empty());
+        assert_eq!(tree.size, 0);
+        assert_eq!(tree.disk_usage, 0);
+        assert_eq!(tree.file_count, 0);
+    }
+
+    fn finish_delete(app: &mut App) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.operation_kind().is_some() && std::time::Instant::now() < deadline {
+            app.poll_operation_result();
+            std::thread::yield_now();
+        }
+        assert_eq!(app.operation_kind(), None);
+    }
+
+    #[test]
+    fn test_delete_directory_preserves_unrelated_tree_and_disk_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let cache_path = cache.path().join("metadata.json");
+        let parent = tmp.path().join("parent");
+        let deleted = parent.join("project");
+        fs::create_dir_all(deleted.join("target")).unwrap();
+        fs::write(deleted.join("Cargo.toml"), "[package]").unwrap();
+        fs::write(deleted.join("target/artifact"), "artifact").unwrap();
+        fs::write(parent.join("keep"), "kept").unwrap();
+        let mut app = App::with_scan_options(
+            tmp.path().to_path_buf(),
+            ScanOptions::default().with_cache(cache_path.clone(), 3600),
+        );
+        app.initial_scan();
+        app.expanded.insert(parent.clone());
+        app.expanded.insert(deleted.clone());
+        app.rebuild_visible_entries();
+        let cached_bytes = fs::read(&cache_path).unwrap();
+        // A root rescan would pick this up; an in-memory deletion must not.
+        fs::write(parent.join("keep"), "a much longer external change").unwrap();
+        app.selected = app
+            .visible_entries
+            .iter()
+            .position(|e| e.entry.path == deleted)
+            .unwrap();
+        app.delete_selected();
+        finish_delete(&mut app);
+
+        assert!(!app.scanning);
+        assert!(!app.project_detection_running);
+        assert!(!app.detected_projects.contains_key(&deleted));
+        assert!(!app.expanded.contains(&deleted));
+        assert!(app.expanded.contains(&parent));
+        let tree = app.tree.as_ref().unwrap();
+        assert_eq!((tree.size, tree.file_count, tree.dir_count), (4, 1, 1));
+        assert_eq!(tree.children[0].size, 4);
+        assert_eq!(fs::read(&cache_path).unwrap(), cached_bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_delete_failure_refreshes_only_affected_subtree() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let cache_path = cache.path().join("metadata.json");
+        let deleted = tmp.path().join("partial");
+        let blocked = deleted.join("blocked");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::write(blocked.join("keep"), "protected").unwrap();
+        fs::write(deleted.join("removable"), "remove me").unwrap();
+        fs::write(tmp.path().join("unrelated"), "kept").unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+        let mut app = App::with_scan_options(
+            tmp.path().to_path_buf(),
+            ScanOptions::default().with_cache(cache_path.clone(), 3600),
+        );
+        app.initial_scan();
+        let cached_bytes = fs::read(&cache_path).unwrap();
+        fs::write(tmp.path().join("unrelated"), "external change").unwrap();
+        app.selected = app
+            .visible_entries
+            .iter()
+            .position(|e| e.entry.path == deleted)
+            .unwrap();
+        app.delete_selected();
+        finish_delete(&mut app);
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(!app.scanning);
+        assert!(app.status_message.as_deref().unwrap().starts_with("Error:"));
+        let actual = scan_directory(&deleted, &ScanOptions::default()).unwrap();
+        let tree = app.tree.as_ref().unwrap();
+        let remaining = App::tree_entry(tree, &deleted).unwrap();
+        assert_eq!(remaining.size, actual.size);
+        assert_eq!(remaining.file_count, actual.file_count);
+        assert_eq!(tree.size, actual.size + 4);
+        assert_eq!(fs::read(&cache_path).unwrap(), cached_bytes);
+    }
+
+    #[test]
+    fn test_delete_during_scan_cannot_be_restored_by_stale_results() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = tmp.path().join("parent");
+        let deleted = parent.join("project");
+        fs::create_dir_all(&deleted).unwrap();
+        fs::write(deleted.join("Cargo.toml"), "[package]").unwrap();
+        fs::write(parent.join("keep"), "kept").unwrap();
+        let mut app = App::new(tmp.path().to_path_buf());
+        app.initial_scan();
+        let stale_tree = app.tree.as_ref().unwrap().clone();
+        let stale_projects = app.detected_projects.values().cloned().collect();
+        app.expanded.insert(parent.clone());
+        app.rebuild_visible_entries();
+        app.selected = app
+            .visible_entries
+            .iter()
+            .position(|e| e.entry.path == deleted)
+            .unwrap();
+        let (scan_tx, scan_rx) = mpsc::channel();
+        app.scan_receiver = Some(scan_rx);
+        app.scanning = true;
+        let (project_tx, project_rx) = mpsc::channel();
+        app.project_receiver = Some(project_rx);
+        app.project_detection_running = true;
+
+        app.delete_selected();
+        finish_delete(&mut app);
+        assert!(app.scanning, "the existing scan should continue");
+        scan_tx
+            .send(ScanUpdate::Started {
+                root: DirEntry::new_dir(tmp.path().to_path_buf(), None),
+                total: 1,
+            })
+            .unwrap();
+        scan_tx
+            .send(ScanUpdate::Entry {
+                entry: stale_tree.children[0].clone(),
+                completed: 1,
+                total: 1,
+            })
+            .unwrap();
+        scan_tx.send(ScanUpdate::Complete).unwrap();
+        project_tx.send(stale_projects).unwrap();
+        while app.poll_background_work() {}
+
+        assert!(!app.scanning);
+        assert!(!app.detected_projects.contains_key(&deleted));
+        let tree = app.tree.as_ref().unwrap();
+        assert!(App::tree_entry(tree, &deleted).is_none());
+        assert_eq!((tree.size, tree.file_count, tree.dir_count), (4, 1, 1));
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .starts_with("Deleted:"));
+
+        // Explicit refresh must allow paths recreated since the deletion.
+        fs::create_dir(&deleted).unwrap();
+        app.trigger_rescan();
+        assert!(App::tree_entry(app.tree.as_ref().unwrap(), &deleted).is_some());
     }
 
     #[test]

@@ -11,12 +11,21 @@ use super::app::{App, ConfirmAction, Mode};
 /// Returns `Ok(true)` if an event was handled, `Ok(false)` if timeout expired.
 pub fn handle_events(app: &mut App, timeout: Duration) -> std::io::Result<bool> {
     if event::poll(timeout)? {
-        if let Event::Key(key) = event::read()? {
-            handle_key_event(app, key);
-            return Ok(true);
-        }
+        return Ok(handle_terminal_event(app, event::read()?));
     }
     Ok(false)
+}
+
+/// Apply terminal input on the UI thread; resize requests a fresh frame too.
+pub fn handle_terminal_event(app: &mut App, event: Event) -> bool {
+    match event {
+        Event::Key(key) if key.kind != event::KeyEventKind::Release => {
+            handle_key_event(app, key);
+            true
+        }
+        Event::Resize(_, _) => true,
+        _ => false,
+    }
 }
 
 /// Handle a single key event.
@@ -205,6 +214,19 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn test_resize_invalidates_frame_and_key_release_does_not_act() {
+        let mut app = App::new(PathBuf::from("/test"));
+        assert!(handle_terminal_event(&mut app, Event::Resize(120, 40)));
+        let release = KeyEvent::new_with_kind(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+            event::KeyEventKind::Release,
+        );
+        assert!(!handle_terminal_event(&mut app, Event::Key(release)));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
     fn test_quit_on_q() {
         let mut app = App::new(PathBuf::from("/"));
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
@@ -319,6 +341,7 @@ mod tests {
     #[test]
     fn test_toggle_hidden() {
         let mut app = App::new(PathBuf::from("/"));
+        app.show_hidden = false;
         assert!(!app.show_hidden);
 
         let key = KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE);

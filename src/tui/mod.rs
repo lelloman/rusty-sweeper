@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod event;
+mod runtime;
 pub mod ui;
 pub mod widgets;
 
@@ -9,10 +10,12 @@ pub use app::App;
 
 use std::io::{self, stdout, Stdout};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::CleanerConfig;
-use event::handle_events;
+use event::handle_terminal_event;
+use runtime::{FrameSchedule, InputWorker};
 use ui::render;
 
 use crossterm::{
@@ -54,20 +57,49 @@ pub fn run_with_options(
     // Initialize app and start background scan
     let mut app = App::with_options(root, scan_options, cleaner_config);
     app.detect_system = true;
+    app.attach_ui_thread();
     app.start_initial_scan();
 
     run_with_cleanup(
         || {
-            // Main loop
+            let input = InputWorker::start(thread::current());
+            let mut frames = FrameSchedule::new(Instant::now());
+            let mut next_disk_refresh = Instant::now();
             while !app.should_quit {
-                // Poll for scan results from background thread
-                app.poll_background_work();
-
-                // Render
-                terminal.draw(|frame| render(&app, frame))?;
-
-                // Handle events (with 100ms timeout for responsive UI)
-                handle_events(&mut app, Duration::from_millis(100))?;
+                if Instant::now() >= next_disk_refresh {
+                    app.start_disk_usage_refresh();
+                    next_disk_refresh = Instant::now() + Duration::from_secs(2);
+                }
+                // Bound input and result batches so neither can starve the other.
+                for index in 0..64 {
+                    let Some(event) = input.try_recv()? else {
+                        break;
+                    };
+                    app.flush_view_updates();
+                    frames.changed(handle_terminal_event(&mut app, event));
+                    if app.should_quit {
+                        break;
+                    }
+                    if index == 63 {
+                        thread::current().unpark();
+                    }
+                }
+                if app.should_quit {
+                    break;
+                }
+                frames.changed(app.poll_background_work());
+                if frames.ready(Instant::now()) {
+                    app.flush_view_updates();
+                    terminal.draw(|frame| render(&app, frame))?;
+                    frames.rendered(Instant::now());
+                }
+                // unpark notifications are coalesced and retained even if they
+                // arrive before this wait, so a result cannot lose its wakeup.
+                let disk_wait = next_disk_refresh.saturating_duration_since(Instant::now());
+                let timeout = frames
+                    .wait(Instant::now())
+                    .map_or(disk_wait, |frame_wait| frame_wait.min(disk_wait));
+                thread::park_timeout(timeout);
             }
 
             Ok(())
