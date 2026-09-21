@@ -454,6 +454,48 @@ fn test_tui_help_mode() {
     assert_eq!(app.mode, Mode::Normal);
 }
 
+#[cfg(unix)]
+#[test]
+fn test_tui_recursive_clean_continues_after_permission_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempdir().unwrap();
+    let first = temp.path().join("first-app");
+    let second = temp.path().join("second-app");
+    for project in [&first, &second] {
+        fs::create_dir_all(project.join("node_modules")).unwrap();
+        fs::write(project.join("package.json"), "{}").unwrap();
+        fs::write(project.join("node_modules/dependency.js"), "x".repeat(32)).unwrap();
+    }
+    let blocked = first.join("node_modules/blocked");
+    fs::create_dir(&blocked).unwrap();
+    fs::write(blocked.join("keep"), "protected").unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let mut app = app_for_cleaning(temp.path().to_path_buf(), &["npm"]);
+    app.initial_scan();
+    handle_key_event(&mut app, key_char('C'));
+    wait_for_background_work(&mut app);
+    assert!(matches!(
+        app.mode,
+        Mode::Confirm(ConfirmAction::CleanRecursive)
+    ));
+    handle_key_event(&mut app, key_char('y'));
+    wait_for_background_work(&mut app);
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(blocked.join("keep").exists());
+    assert!(!first.join("node_modules/dependency.js").exists());
+    assert!(!second.join("node_modules").exists());
+    let status = app.status_message.as_deref().unwrap_or_default();
+    assert!(status.contains("Cleaned 1 projects; 1 failed"), "{status}");
+    assert!(status.contains("64 B"), "{status}");
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(!app.should_quit);
+    handle_key_event(&mut app, key_char('?'));
+    assert_eq!(app.mode, Mode::Help);
+}
+
 #[test]
 fn test_tui_quit() {
     let mut app = App::new(PathBuf::from("/"));

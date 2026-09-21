@@ -19,7 +19,7 @@ pub enum CleanResult {
     Failed {
         project: DetectedProject,
         error: String,
-        /// Bytes removed before the operation failed.
+        /// Bytes removed, including cleanup that continued after errors.
         freed_bytes: u64,
     },
     /// Cleaning was skipped.
@@ -70,10 +70,12 @@ impl CleanExecutor {
             };
         }
 
+        let mut native_error = None;
+        let size_before = Self::artifact_size(&project.artifact_paths);
+
         // Try native command first if available and enabled
         if self.options.use_native_commands {
             if let Some(cmd) = clean_command {
-                let size_before = Self::artifact_size(&project.artifact_paths);
                 match self.run_clean_command(&project.path, cmd) {
                     Ok(()) => {
                         let size_after = Self::artifact_size(&project.artifact_paths);
@@ -83,36 +85,28 @@ impl CleanExecutor {
                         };
                     }
                     Err(e) => {
-                        if e.kind() == io::ErrorKind::NotFound {
-                            // A project may be a Gradle submodule without its
-                            // own wrapper. Falling back to direct deletion is
-                            // expected and should not corrupt the TUI with a
-                            // warning on stderr.
-                            tracing::debug!(
-                                "Native clean command unavailable for {}, falling back to direct deletion",
-                                project.path.display()
-                            );
-                        } else {
-                            tracing::warn!(
-                                "Native clean command failed for {}: {}, falling back to direct deletion",
-                                project.path.display(),
-                                e
-                            );
-                        }
+                        // Report diagnostics through the result, never through
+                        // terminal logging (even when verbose logging is on).
+                        native_error = Some(e);
                     }
                 }
             }
         }
 
         // Direct deletion
-        match self.delete_artifacts(project) {
-            Ok(freed) => CleanResult::Success {
+        let result = self.delete_artifacts(project);
+        let freed_bytes = size_before.saturating_sub(Self::artifact_size(&project.artifact_paths));
+        match result {
+            Ok(()) => CleanResult::Success {
                 project: project.clone(),
-                freed_bytes: freed,
+                freed_bytes,
             },
-            Err((e, freed_bytes)) => CleanResult::Failed {
+            Err(e) => CleanResult::Failed {
                 project: project.clone(),
-                error: e.to_string(),
+                error: match native_error {
+                    Some(native) => format!("{e}; native clean failed: {native}"),
+                    None => e.to_string(),
+                },
                 freed_bytes,
             },
         }
@@ -139,20 +133,65 @@ impl CleanExecutor {
         }
     }
 
-    fn delete_artifacts(&self, project: &DetectedProject) -> Result<u64, (io::Error, u64)> {
-        let mut freed = 0u64;
-
+    fn delete_artifacts(&self, project: &DetectedProject) -> io::Result<()> {
+        let mut first_error = None;
         for artifact_path in &project.artifact_paths {
-            if artifact_path.exists() {
-                let size = Self::dir_size(artifact_path);
-                if let Err(error) = fs::remove_dir_all(artifact_path) {
-                    return Err((error, freed));
+            if let Err(error) = Self::delete_artifact(artifact_path) {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn removal_error(path: &Path, error: io::Error) -> io::Error {
+        io::Error::new(
+            error.kind(),
+            format!("Failed to remove {}: {error}", path.display()),
+        )
+    }
+
+    fn delete_artifact(path: &Path) -> io::Result<()> {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                // Preserve directory-only artifact handling. Never traverse a
+                // symlink that replaced the directory after removal failed.
+                if !fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+                    return Err(Self::removal_error(path, error));
                 }
-                freed += size;
             }
         }
 
-        Ok(freed)
+        // remove_dir_all stops at the first error. Visit the remaining tree
+        // bottom-up so an inaccessible entry doesn't block removable siblings.
+        let mut first_error = None;
+        for entry in WalkDir::new(path)
+            .follow_links(false)
+            .follow_root_links(false)
+            .contents_first(true)
+        {
+            let result = match entry {
+                Ok(entry) => {
+                    let result = if entry.file_type().is_dir() {
+                        fs::remove_dir(entry.path())
+                    } else {
+                        fs::remove_file(entry.path())
+                    };
+                    result.map_err(|error| Self::removal_error(entry.path(), error))
+                }
+                Err(error) => {
+                    let failed_path = error.path().unwrap_or(path).to_path_buf();
+                    Err(Self::removal_error(&failed_path, error.into()))
+                }
+            };
+            if let Err(error) = result {
+                if error.kind() != io::ErrorKind::NotFound {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     fn dir_size(path: &Path) -> u64 {
@@ -356,6 +395,113 @@ mod tests {
     }
 
     #[test]
+    fn test_clean_continues_to_artifacts_after_failure() {
+        let (tmp, mut project) = create_test_project();
+        let invalid = tmp.path().join("not-a-directory");
+        fs::write(&invalid, "file").unwrap();
+        project.artifact_paths.insert(0, invalid);
+
+        let result = CleanExecutor::new(CleanOptions::default()).clean(&project, None);
+
+        assert!(!tmp.path().join("target").exists());
+        assert!(matches!(
+            result,
+            CleanResult::Failed {
+                freed_bytes: 1000,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_clean_continues_past_unwritable_directory_without_following_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let (tmp, project) = create_test_project();
+        let target = &project.artifact_paths[0];
+        let blocked = target.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("keep"), "protected").unwrap();
+        let outside = tmp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("keep"), "outside").unwrap();
+        symlink(&outside, target.join("link")).unwrap();
+        fs::create_dir(target.join("sibling")).unwrap();
+        fs::write(target.join("sibling/removable"), "x".repeat(200)).unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = CleanExecutor::new(CleanOptions::default()).clean(&project, None);
+        // Restore permissions before assertions so the fixture can be removed.
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(blocked.join("keep").exists());
+        assert!(outside.join("keep").exists());
+        assert!(!target.join("link").exists());
+        assert!(!target.join("artifact.bin").exists());
+        assert!(!target.join("sibling").exists());
+        let CleanResult::Failed {
+            freed_bytes, error, ..
+        } = result
+        else {
+            panic!("Expected partial failure");
+        };
+        assert_eq!(freed_bytes, 1200);
+        assert!(error.contains("blocked"));
+    }
+
+    #[test]
+    fn test_native_partial_deletion_is_counted_after_fallback() {
+        let (tmp, project) = create_test_project();
+        fs::write(
+            tmp.path().join("clean.sh"),
+            "rm target/artifact.bin\nexit 1\n",
+        )
+        .unwrap();
+
+        let result =
+            CleanExecutor::new(CleanOptions::default()).clean(&project, Some("sh clean.sh"));
+
+        assert!(!tmp.path().join("target").exists());
+        assert!(matches!(
+            result,
+            CleanResult::Success {
+                freed_bytes: 1000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_native_failure_emits_no_terminal_logs_even_at_trace_level() {
+        use std::sync::{Arc, Mutex};
+        struct Writer(Arc<Mutex<Vec<u8>>>);
+        impl io::Write for Writer {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&output);
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || Writer(Arc::clone(&captured)))
+            .finish();
+        let (_tmp, project) = create_test_project();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let result = CleanExecutor::new(CleanOptions::default()).clean(&project, Some("false"));
+            assert!(matches!(result, CleanResult::Success { .. }));
+        });
+
+        assert!(output.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn test_native_clean_reports_measured_bytes_freed() {
         let (_tmp, project) = create_test_project();
         let executor = CleanExecutor::new(CleanOptions {
@@ -370,5 +516,42 @@ mod tests {
             result,
             CleanResult::Success { freed_bytes: 0, .. }
         ));
+    }
+
+    #[test]
+    fn test_failed_native_clean_falls_back_to_deletion() {
+        let (_tmp, project) = create_test_project();
+        let result = CleanExecutor::new(CleanOptions::default()).clean(&project, Some("false"));
+
+        assert!(!project.artifact_paths[0].exists());
+        assert!(matches!(
+            result,
+            CleanResult::Success {
+                freed_bytes: 1000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_failed_fallback_preserves_native_error_and_artifact_path() {
+        let (tmp, mut project) = create_test_project();
+        let invalid = tmp.path().join("not-a-directory");
+        fs::write(&invalid, "file").unwrap();
+        fs::write(
+            tmp.path().join("clean.sh"),
+            "echo 'failed to remove directory target/blocked: Permission denied' >&2\nexit 1\n",
+        )
+        .unwrap();
+        project.artifact_paths = vec![invalid.clone()];
+
+        let result =
+            CleanExecutor::new(CleanOptions::default()).clean(&project, Some("sh clean.sh"));
+
+        let CleanResult::Failed { error, .. } = result else {
+            panic!("Expected failure");
+        };
+        assert!(error.contains(&invalid.display().to_string()));
+        assert!(error.contains("target/blocked: Permission denied"));
     }
 }

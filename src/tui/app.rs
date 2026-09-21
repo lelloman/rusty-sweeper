@@ -202,7 +202,7 @@ fn clean_project(
             error, freed_bytes, ..
         } if freed_bytes > 0 => (
             format!(
-                "Project partially cleaned, freed {} before failure: {}",
+                "Project partially cleaned, freed {}; some artifacts remain: {}",
                 humansize::format_size(freed_bytes, humansize::BINARY),
                 error
             ),
@@ -258,7 +258,7 @@ fn clean_projects(
     );
     let results = orchestrator.clean_all_cancellable(projects, None, Arc::clone(&cancel));
     let summary = CleanOrchestrator::summarize(&results);
-    let message = if cancel.load(Ordering::Acquire) {
+    let mut message = if cancel.load(Ordering::Acquire) {
         format!(
             "Recursive cleanup cancelled: cleaned {}/{} projects, freed {} ({} failed)",
             summary.success_count,
@@ -281,6 +281,16 @@ fn clean_projects(
             humansize::format_size(summary.total_freed, humansize::BINARY)
         )
     };
+
+    if let Some((project, error)) = results.iter().find_map(|result| match result {
+        CleanResult::Failed { project, error, .. } => Some((project, error)),
+        _ => None,
+    }) {
+        // Native tools may produce multiline diagnostics; keep the status on
+        // one line so failures remain inside the TUI.
+        let error = error.split_whitespace().collect::<Vec<_>>().join(" ");
+        message.push_str(&format!("; {}: {}", project.path.display(), error));
+    }
 
     OperationOutcome {
         message,
@@ -2028,6 +2038,35 @@ mod tests {
     }
 
     // Clean tests
+
+    #[test]
+    fn test_recursive_clean_reports_failed_project_and_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let artifact = tmp.path().join("not-a-directory");
+        fs::write(&artifact, "file").unwrap();
+        let project = DetectedProject {
+            path: tmp.path().to_path_buf(),
+            project_type: "npm".into(),
+            display_name: "npm".into(),
+            artifact_size: 4,
+            artifact_paths: vec![artifact.clone()],
+        };
+
+        let outcome = clean_projects(
+            vec![project],
+            tmp.path().to_path_buf(),
+            CleanerConfig::default(),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        assert!(outcome.message.contains("1 failed"));
+        assert!(outcome.message.contains(&tmp.path().display().to_string()));
+        assert!(outcome
+            .message
+            .contains(&format!("Failed to remove {}", artifact.display())));
+        assert!(!outcome.message.contains('\n'));
+        assert!(outcome.rescan);
+    }
 
     fn app_for_cleaning(root: PathBuf) -> App {
         let mut cleaner = CleanerConfig::default();
