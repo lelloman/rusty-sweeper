@@ -362,6 +362,8 @@ fn scan_directory_parallel_inner(
     )
 }
 
+// Recursive traversal carries the shared inode sets and metadata cache.
+#[allow(clippy::too_many_arguments)]
 fn scan_dir_recursive_parallel(
     path: &Path,
     root: &Path,

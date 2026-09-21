@@ -42,7 +42,9 @@ fn test_monitor_once_with_custom_mount() {
 #[test]
 fn test_monitor_once_multiple_mounts() {
     rusty_sweeper_monitor()
-        .args(["--once", "--notify", "stderr", "--mount", "/", "--mount", "/home"])
+        .args([
+            "--once", "--notify", "stderr", "--mount", "/", "--mount", "/home",
+        ])
         .assert()
         .success();
 }
@@ -145,13 +147,7 @@ fn test_monitor_unknown_backend() {
 #[test]
 fn test_monitor_custom_interval() {
     rusty_sweeper_monitor()
-        .args([
-            "--once",
-            "--notify",
-            "stderr",
-            "--interval",
-            "60",
-        ])
+        .args(["--once", "--notify", "stderr", "--interval", "60"])
         .assert()
         .success();
 }

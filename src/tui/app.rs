@@ -38,6 +38,8 @@ pub enum Mode {
 pub enum ConfirmAction {
     /// Delete a file or directory.
     Delete,
+    /// Retry the failed deletion with elevated permissions.
+    SudoDelete,
     /// Clean a project's build artifacts.
     Clean,
     /// Clean all eligible projects below a directory.
@@ -86,6 +88,7 @@ struct OperationOutcome {
     refresh_system_resources: bool,
     project_refresh: Option<ProjectRefresh>,
     deletion_patch: Option<TreePatch>,
+    sudo_retry: Option<PathBuf>,
 }
 
 struct ProjectRefresh {
@@ -136,6 +139,31 @@ fn delete_path(path: &Path) -> std::io::Result<()> {
     }
 }
 
+fn deletion_outcome(
+    path: PathBuf,
+    scan_options: &ScanOptions,
+    result: std::io::Result<()>,
+    offer_sudo: bool,
+) -> OperationOutcome {
+    let (message, replacement, sudo_retry) = match result {
+        Ok(()) => (format!("Deleted: {}", path.display()), Some(None), None),
+        Err(error) => {
+            let retry = (offer_sudo && error.kind() == std::io::ErrorKind::PermissionDenied)
+                .then(|| path.clone());
+            let replacement = scan_directory(&path, scan_options).ok().map(Some);
+            (format!("Error: {error}"), replacement, retry)
+        }
+    };
+    OperationOutcome {
+        message,
+        rescan: false,
+        refresh_system_resources: false,
+        project_refresh: None,
+        deletion_patch: replacement.map(|replacement| TreePatch { path, replacement }),
+        sudo_retry,
+    }
+}
+
 fn cancelled_outcome(action: &str) -> OperationOutcome {
     OperationOutcome {
         message: format!("{} cancelled", action),
@@ -143,6 +171,7 @@ fn cancelled_outcome(action: &str) -> OperationOutcome {
         refresh_system_resources: false,
         project_refresh: None,
         deletion_patch: None,
+        sudo_retry: None,
     }
 }
 
@@ -200,6 +229,7 @@ fn clean_project(
             refresh_system_resources: false,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         };
     }
     if cancel.load(Ordering::Acquire) {
@@ -244,6 +274,7 @@ fn clean_project(
         refresh_system_resources: false,
         project_refresh,
         deletion_patch: None,
+        sudo_retry: None,
     }
 }
 
@@ -275,6 +306,7 @@ fn clean_projects(
             refresh_system_resources: false,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         };
     }
 
@@ -326,6 +358,7 @@ fn clean_projects(
         refresh_system_resources: false,
         project_refresh: None,
         deletion_patch: None,
+        sudo_retry: None,
     }
 }
 
@@ -346,6 +379,7 @@ fn clean_system_resource(
             refresh_system_resources: false,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         };
     };
 
@@ -360,6 +394,7 @@ fn clean_system_resource(
             refresh_system_resources: true,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         },
         SystemCleanResult::Failed { error, .. } => OperationOutcome {
             message: format!("Clean failed: {}", error),
@@ -367,6 +402,7 @@ fn clean_system_resource(
             refresh_system_resources: false,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         },
         SystemCleanResult::Skipped { reason, .. } => OperationOutcome {
             message: format!("Clean skipped: {}", reason),
@@ -374,6 +410,7 @@ fn clean_system_resource(
             refresh_system_resources: false,
             project_refresh: None,
             deletion_patch: None,
+            sudo_retry: None,
         },
     }
 }
@@ -479,6 +516,9 @@ pub struct App {
     pub(crate) cached_disk_usage: Option<(u64, u64, u64)>,
     disk_usage_receiver: Option<Receiver<Option<(u64, u64, u64)>>>,
 
+    pending_sudo_delete: Option<PathBuf>,
+    sudo_delete_request: Option<PathBuf>,
+
     // Reapply local deletions to results from an overlapping scan.
     deletion_patches: Vec<TreePatch>,
 
@@ -535,6 +575,41 @@ pub struct App {
 }
 
 impl App {
+    pub fn pending_sudo_delete(&self) -> Option<&Path> {
+        self.pending_sudo_delete.as_deref()
+    }
+
+    pub fn confirm_sudo_delete(&mut self) {
+        self.sudo_delete_request = self.pending_sudo_delete.take().filter(|path| {
+            path.is_absolute() && path != &self.root && path.starts_with(&self.root)
+        });
+    }
+
+    pub fn cancel_sudo_delete(&mut self) {
+        self.pending_sudo_delete = None;
+        self.sudo_delete_request = None;
+        self.status_message = Some("Sudo deletion cancelled; remaining files kept".into());
+    }
+
+    pub(crate) fn take_sudo_delete_request(&mut self) -> Option<PathBuf> {
+        self.sudo_delete_request.take()
+    }
+
+    pub(crate) fn sudo_delete_requested(&self) -> bool {
+        self.sudo_delete_request.is_some()
+    }
+
+    pub(crate) fn finish_sudo_delete(&mut self, path: PathBuf, result: std::io::Result<()>) {
+        let mut options = self.scan_options.clone();
+        options.include_hidden = true;
+        options.cache = None;
+        self.start_operation(
+            OperationKind::Delete,
+            "Refreshing deletion result...".into(),
+            move |_| deletion_outcome(path, &options, result, false),
+        );
+    }
+
     pub(crate) fn attach_ui_thread(&mut self) {
         self.wakeup = Some(thread::current());
         self.defer_view_updates = true;
@@ -570,6 +645,9 @@ impl App {
         scan_options: ScanOptions,
         cleaner_config: CleanerConfig,
     ) -> Self {
+        // Expansion and action paths must use the same canonical root as the
+        // scanner, including when the user starts with ".", "..", or a symlink.
+        let root = root.canonicalize().unwrap_or(root);
         Self {
             root,
             scan_options,
@@ -586,6 +664,8 @@ impl App {
             status_message: None,
             post_operation_message: None,
             deletion_patches: Vec::new(),
+            pending_sudo_delete: None,
+            sudo_delete_request: None,
             wakeup: None,
             defer_view_updates: false,
             view_dirty: false,
@@ -1139,9 +1219,9 @@ impl App {
     /// Sort entries according to current sort order.
     fn sort_entries(&self, entries: &mut [&DirEntry]) {
         match self.sort_order {
-            SortOrder::Size => entries.sort_by(|a, b| b.size.cmp(&a.size)),
+            SortOrder::Size => entries.sort_by_key(|entry| std::cmp::Reverse(entry.size)),
             SortOrder::Name => entries.sort_by(|a, b| a.name.cmp(&b.name)),
-            SortOrder::Mtime => entries.sort_by(|a, b| b.mtime.cmp(&a.mtime)),
+            SortOrder::Mtime => entries.sort_by_key(|entry| std::cmp::Reverse(entry.mtime)),
         }
     }
 
@@ -1477,6 +1557,10 @@ impl App {
             self.start_background_scan();
         }
         self.status_message = Some(message);
+        if let Some(path) = outcome.sudo_retry {
+            self.pending_sudo_delete = Some(path);
+            self.mode = Mode::Confirm(ConfirmAction::SudoDelete);
+        }
         true
     }
 
@@ -1587,38 +1671,12 @@ impl App {
                         refresh_system_resources: false,
                         project_refresh: None,
                         deletion_patch: None,
+                        sudo_retry: None,
                     };
                 }
-                match delete_path(&path) {
-                    Ok(()) => OperationOutcome {
-                        message: format!("Deleted: {}", display_path),
-                        rescan: false,
-                        refresh_system_resources: false,
-                        project_refresh: None,
-                        deletion_patch: Some(TreePatch {
-                            path,
-                            replacement: None,
-                        }),
-                    },
-                    Err(error) => {
-                        // A failed directory removal may have removed some
-                        // children. Refresh only what remains at this path.
-                        let deletion_patch =
-                            scan_directory(&path, &scan_options)
-                                .ok()
-                                .map(|entry| TreePatch {
-                                    path,
-                                    replacement: Some(entry),
-                                });
-                        OperationOutcome {
-                            message: format!("Error: {}", error),
-                            rescan: false,
-                            refresh_system_resources: false,
-                            project_refresh: None,
-                            deletion_patch,
-                        }
-                    }
-                }
+                let result = delete_path(&path);
+                let offer_sudo = !cancel.load(Ordering::Acquire);
+                deletion_outcome(path, &scan_options, result, offer_sudo)
             },
         );
     }
@@ -1835,6 +1893,46 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_initial_background_scan_expands_relative_starting_directory() {
+        let tmp = tempfile::tempdir_in(".").unwrap();
+        let child = tmp.path().join("visible-child");
+        fs::create_dir(&child).unwrap();
+        let expected_root = tmp.path().canonicalize().unwrap();
+        let mut app = App::new(tmp.path().to_path_buf());
+        app.attach_ui_thread();
+        app.start_initial_scan();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.scanning && std::time::Instant::now() < deadline {
+            app.poll_background_work();
+            std::thread::yield_now();
+        }
+        app.flush_view_updates();
+        assert!(!app.scanning);
+        assert_eq!(app.root, expected_root);
+        assert!(app.expanded.contains(&expected_root));
+        assert!(app
+            .visible_entries
+            .iter()
+            .any(|entry| entry.entry.path == expected_root.join("visible-child")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_initial_scan_expands_symlink_starting_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("visible-child"), "file").unwrap();
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&target, &alias).unwrap();
+        let mut app = App::new(alias);
+        app.initial_scan();
+        assert_eq!(app.root, target);
+        assert!(app.expanded.contains(&target));
+        assert_eq!(app.visible_entries.len(), 2);
+    }
 
     #[test]
     fn test_scan_backlog_is_batched_and_view_is_built_only_when_needed() {
@@ -2493,6 +2591,8 @@ mod tests {
 
         assert!(!app.scanning);
         assert!(app.status_message.as_deref().unwrap().starts_with("Error:"));
+        assert_eq!(app.mode, Mode::Confirm(ConfirmAction::SudoDelete));
+        assert_eq!(app.pending_sudo_delete(), Some(deleted.as_path()));
         let actual = scan_directory(&deleted, &ScanOptions::default()).unwrap();
         let tree = app.tree.as_ref().unwrap();
         let remaining = App::tree_entry(tree, &deleted).unwrap();
@@ -2500,6 +2600,121 @@ mod tests {
         assert_eq!(remaining.file_count, actual.file_count);
         assert_eq!(tree.size, actual.size + 4);
         assert_eq!(fs::read(&cache_path).unwrap(), cached_bytes);
+    }
+
+    #[test]
+    fn test_sudo_retry_stays_bound_to_failed_path_and_patches_success() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let tmp = tempfile::tempdir().unwrap();
+        let failed = tmp.path().join("failed");
+        let other = tmp.path().join("other");
+        fs::create_dir(&failed).unwrap();
+        fs::create_dir(&other).unwrap();
+        fs::write(failed.join("file"), "keep until confirmed").unwrap();
+        let mut app = App::new(tmp.path().to_path_buf());
+        app.initial_scan();
+        let (tx, rx) = mpsc::channel();
+        app.operation_receiver = Some(rx);
+        tx.send(deletion_outcome(
+            failed.clone(),
+            &ScanOptions::default(),
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            true,
+        ))
+        .unwrap();
+        assert!(app.poll_operation_result());
+        assert_eq!(app.mode, Mode::Confirm(ConfirmAction::SudoDelete));
+        assert!(
+            !app.sudo_delete_requested(),
+            "offering sudo must not execute it"
+        );
+        app.selected = app
+            .visible_entries
+            .iter()
+            .position(|entry| entry.entry.path == other)
+            .unwrap();
+        super::super::event::handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+        );
+        assert_eq!(app.take_sudo_delete_request(), Some(failed.clone()));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(failed.join("file").exists());
+
+        // Simulate the privileged command's success without invoking sudo.
+        fs::remove_dir_all(&failed).unwrap();
+        app.finish_sudo_delete(failed.clone(), Ok(()));
+        finish_delete(&mut app);
+        assert!(!app.scanning);
+        assert!(App::tree_entry(app.tree.as_ref().unwrap(), &failed).is_none());
+        assert!(other.exists());
+        assert!(app.pending_sudo_delete().is_none());
+    }
+
+    #[test]
+    fn test_sudo_prompt_can_be_declined_without_requesting_privileges() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("keep");
+        fs::write(&target, "keep").unwrap();
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let mut app = App::new(tmp.path().to_path_buf());
+            app.pending_sudo_delete = Some(target.clone());
+            app.mode = Mode::Confirm(ConfirmAction::SudoDelete);
+            super::super::event::handle_key_event(
+                &mut app,
+                KeyEvent::new(code, KeyModifiers::NONE),
+            );
+            assert_eq!(app.mode, Mode::Normal);
+            assert!(app.pending_sudo_delete().is_none());
+            assert!(app.take_sudo_delete_request().is_none());
+            assert!(target.exists());
+        }
+    }
+
+    #[test]
+    fn test_non_permission_errors_and_failed_sudo_do_not_prompt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("keep");
+        fs::write(&target, "keep").unwrap();
+        for (kind, offer) in [
+            (std::io::ErrorKind::NotFound, true),
+            (std::io::ErrorKind::PermissionDenied, false),
+            (std::io::ErrorKind::Interrupted, false),
+        ] {
+            let outcome = deletion_outcome(
+                target.clone(),
+                &ScanOptions::default(),
+                Err(kind.into()),
+                offer,
+            );
+            assert!(outcome.sudo_retry.is_none());
+            assert!(!outcome.rescan);
+            assert!(target.exists());
+        }
+    }
+
+    #[test]
+    fn test_sudo_prompt_shows_failed_path_and_explicit_confirmation() {
+        let mut app = App::new(PathBuf::from("/tmp"));
+        app.pending_sudo_delete = Some(PathBuf::from("/tmp/permission-denied-directory"));
+        app.mode = Mode::Confirm(ConfirmAction::SudoDelete);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| super::super::ui::render(&app, frame))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Permission denied"));
+        assert!(text.contains("/tmp/permission-denied-directory"));
+        assert!(text.contains("[y] Retry with sudo"));
+        assert!(text.contains("[n/Esc] Cancel"));
     }
 
     #[test]

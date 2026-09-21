@@ -3,6 +3,7 @@
 pub mod app;
 pub mod event;
 mod runtime;
+mod sudo;
 pub mod ui;
 pub mod widgets;
 
@@ -62,7 +63,7 @@ pub fn run_with_options(
 
     run_with_cleanup(
         || {
-            let input = InputWorker::start(thread::current());
+            let mut input = Some(InputWorker::start(thread::current()));
             let mut frames = FrameSchedule::new(Instant::now());
             let mut next_disk_refresh = Instant::now();
             while !app.should_quit {
@@ -72,12 +73,12 @@ pub fn run_with_options(
                 }
                 // Bound input and result batches so neither can starve the other.
                 for index in 0..64 {
-                    let Some(event) = input.try_recv()? else {
+                    let Some(event) = input.as_ref().unwrap().try_recv()? else {
                         break;
                     };
                     app.flush_view_updates();
                     frames.changed(handle_terminal_event(&mut app, event));
-                    if app.should_quit {
+                    if app.should_quit || app.sudo_delete_requested() {
                         break;
                     }
                     if index == 63 {
@@ -86,6 +87,17 @@ pub fn run_with_options(
                 }
                 if app.should_quit {
                     break;
+                }
+                if let Some(path) = app.take_sudo_delete_request() {
+                    // Join the sole input reader before sudo owns the terminal.
+                    drop(input.take());
+                    restore_terminal()?;
+                    let result = sudo::delete(&path);
+                    terminal = init_terminal()?;
+                    input = Some(InputWorker::start(thread::current()));
+                    app.finish_sudo_delete(path, result);
+                    next_disk_refresh = Instant::now();
+                    frames.changed(true);
                 }
                 frames.changed(app.poll_background_work());
                 if frames.ready(Instant::now()) {
@@ -151,7 +163,7 @@ pub fn init_terminal() -> io::Result<Tui> {
 /// This disables raw mode and returns to the main screen buffer.
 pub fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+    execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
     Ok(())
 }
 

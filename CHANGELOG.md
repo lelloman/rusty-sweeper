@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-21
+
 ### Added
 
+- Offer a confirmed sudo retry when deleting a file or directory fails with a permission error. Sudo handles authentication, then the TUI resumes.
 - Added recursive subtree cleanup from the TUI with aggregate preview, configured project filtering, and batch results.
+
+### Changed
+
+- Wake the UI when input or worker results arrive, process scan updates in batches, and redraw changed frames at most 60 times per second.
+- Move disk-usage refreshes and cleanup age checks off the rendering thread.
+- Update the in-memory tree after deletion instead of rescanning the root; refresh only the affected subtree after a partial failure.
+
+### Fixed
+
+- Continue cleaning removable files and remaining artifacts after permission failures, keeping errors inside the TUI.
+- Include partial native cleanup in the reported freed space.
+- Keep deleted entries out of stale background scan results.
+- Expand the starting directory correctly for relative and symbolic-link paths.
+- Preserve selection while scan results arrive, handle terminal resizing, and restore the terminal after sudo.
 
 ## [0.3.0] - 2026-08-31
 
@@ -147,7 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uses clap for CLI parsing
 - Uses tracing for logging
 
-[Unreleased]: https://github.com/lelloman/rusty-sweeper/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lelloman/rusty-sweeper/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/lelloman/rusty-sweeper/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lelloman/rusty-sweeper/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lelloman/rusty-sweeper/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lelloman/rusty-sweeper/releases/tag/v0.1.0

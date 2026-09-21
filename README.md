@@ -112,6 +112,10 @@ keyboard input and terminal resizing are handled independently. Deleting an
 entry updates the in-memory tree without rescanning the root. Press `r` to
 refresh changes made outside the application.
 
+If a deletion fails with a permission error, the TUI offers to retry that path
+with sudo. Accepting temporarily opens sudo's terminal password prompt, then
+returns to the TUI. Press `n` or `Esc` to leave the remaining files in place.
+
 | Key | Action |
 |-----|--------|
 | `j` / `Down` | Move down |

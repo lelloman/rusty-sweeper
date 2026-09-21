@@ -140,7 +140,8 @@ impl DirEntry {
 
     /// Sort children by size (largest first)
     pub fn sort_by_size(&mut self) {
-        self.children.sort_by(|a, b| b.size.cmp(&a.size));
+        self.children
+            .sort_by_key(|entry| std::cmp::Reverse(entry.size));
         for child in &mut self.children {
             child.sort_by_size();
         }

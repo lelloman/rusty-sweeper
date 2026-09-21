@@ -436,6 +436,17 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
                 7u16,
             )
         }
+        ConfirmAction::SudoDelete => {
+            let path = app
+                .pending_sudo_delete()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            (
+                " Permission denied ",
+                format!("Retry deletion with sudo?\n\n{path}\n\nSudo may ask for your password.\n\n[y] Retry with sudo  [n/Esc] Cancel"),
+                11u16,
+            )
+        }
         ConfirmAction::Clean => {
             if let Some(preview) = &app.clean_preview {
                 let total_str = humansize::format_size(preview.total_size, humansize::BINARY);
@@ -525,7 +536,24 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
     };
 
     // Center the dialog
-    let dialog_width = 50u16.min(area.width.saturating_sub(4));
+    let dialog_width = if action == ConfirmAction::SudoDelete {
+        80
+    } else {
+        50
+    }
+    .min(area.width.saturating_sub(4));
+    let dialog_height = if action == ConfirmAction::SudoDelete {
+        let inner_width = usize::from(dialog_width.saturating_sub(2).max(1));
+        let lines: usize = message
+            .lines()
+            .map(|line| line.chars().count().max(1).div_ceil(inner_width))
+            .sum();
+        (lines as u16 + 2)
+            .max(dialog_height)
+            .min(area.height.saturating_sub(2))
+    } else {
+        dialog_height
+    };
     let dialog_area = Rect {
         x: (area.width.saturating_sub(dialog_width)) / 2,
         y: (area.height.saturating_sub(dialog_height)) / 2,
@@ -541,10 +569,14 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, action: ConfirmAction) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 
-    let paragraph = Paragraph::new(message)
+    let mut paragraph = Paragraph::new(message)
         .block(block)
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
+
+    if action == ConfirmAction::SudoDelete {
+        paragraph = paragraph.wrap(ratatui::widgets::Wrap { trim: false });
+    }
 
     frame.render_widget(paragraph, dialog_area);
 }

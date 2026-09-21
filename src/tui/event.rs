@@ -183,6 +183,7 @@ fn handle_confirm_mode(app: &mut App, key: KeyEvent, action: ConfirmAction) {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             match action {
                 ConfirmAction::Delete => app.delete_selected(),
+                ConfirmAction::SudoDelete => app.confirm_sudo_delete(),
                 ConfirmAction::Clean => app.clean_selected(),
                 ConfirmAction::CleanRecursive => app.clean_recursive_selected(),
             }
@@ -190,6 +191,9 @@ fn handle_confirm_mode(app: &mut App, key: KeyEvent, action: ConfirmAction) {
             app.mode = Mode::Normal;
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            if action == ConfirmAction::SudoDelete {
+                app.cancel_sudo_delete();
+            }
             app.confirmation_target = None;
             app.clean_preview = None;
             app.clear_recursive_clean_preview();
