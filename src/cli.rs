@@ -1,4 +1,4 @@
-use clap::{Args, Parser};
+use clap::Parser;
 use std::path::PathBuf;
 
 /// Rusty Sweeper - A Linux disk usage management utility
@@ -11,6 +11,26 @@ pub struct Cli {
     #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
 
+    /// Use command-line reports and cleanup instead of opening the TUI
+    #[arg(long)]
+    pub cli: bool,
+
+    /// Discover project artifacts, report them, and confirm before cleaning
+    #[arg(long, requires = "cli", conflicts_with_all = ["json", "depth"])]
+    pub clean: bool,
+
+    /// Clean without asking for confirmation (requires --clean)
+    #[arg(short = 'y', long, requires = "clean")]
+    pub yes: bool,
+
+    /// Print the complete scan as JSON (requires --cli)
+    #[arg(long, requires = "cli")]
+    pub json: bool,
+
+    /// Maximum display depth for text reports (root = 0; scans all depths)
+    #[arg(long, requires = "cli", conflicts_with = "json")]
+    pub depth: Option<usize>,
+
     /// Path to configuration file
     #[arg(short, long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
@@ -24,77 +44,12 @@ pub struct Cli {
     pub quiet: bool,
 }
 
-/// Resolve the TUI's starting path, defaulting to the process working directory.
+/// Resolve the starting path, defaulting to the process working directory.
 pub fn starting_path(path: Option<PathBuf>) -> std::io::Result<PathBuf> {
     match path {
         Some(path) => Ok(path),
         None => std::env::current_dir(),
     }
-}
-
-/// Dedicated CLI for the monitor binary.
-#[derive(Parser, Debug)]
-#[command(name = "rusty-sweeper-monitor")]
-#[command(
-    author,
-    version,
-    about = "Disk usage monitor daemon and alerting service"
-)]
-#[command(propagate_version = true)]
-pub struct MonitorCli {
-    /// Path to configuration file
-    #[arg(short, long, global = true, value_name = "PATH")]
-    pub config: Option<PathBuf>,
-
-    /// Increase verbosity (-v, -vv, -vvv)
-    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
-    pub verbose: u8,
-
-    /// Suppress non-essential output
-    #[arg(short, long, global = true)]
-    pub quiet: bool,
-
-    #[command(flatten)]
-    pub args: MonitorArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct MonitorArgs {
-    /// Run as background daemon
-    #[arg(short, long)]
-    pub daemon: bool,
-
-    /// Check interval in seconds
-    #[arg(short, long, default_value = "300", value_name = "SECS")]
-    pub interval: u64,
-
-    /// Warning threshold percentage
-    #[arg(short, long, default_value = "80", value_name = "PERCENT")]
-    pub warn: u8,
-
-    /// Critical threshold percentage
-    #[arg(short = 'C', long, default_value = "90", value_name = "PERCENT")]
-    pub critical: u8,
-
-    /// Mount points to monitor (can be specified multiple times)
-    #[arg(short, long, value_name = "PATH")]
-    pub mount: Vec<PathBuf>,
-
-    /// Check once and exit
-    #[arg(long)]
-    pub once: bool,
-
-    /// Stop running daemon
-    #[arg(long)]
-    pub stop: bool,
-
-    /// Show daemon status
-    #[arg(long)]
-    pub status: bool,
-
-    /// Notification backend (auto, dbus, notify-send, stderr)
-    #[arg(long, default_value = "auto", value_name = "BACKEND")]
-    pub notify: String,
 }
 
 #[cfg(test)]
@@ -144,9 +99,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_monitor_cli() {
-        let cli = MonitorCli::parse_from(["rusty-sweeper-monitor", "--once", "--notify", "stderr"]);
-        assert!(cli.args.once);
-        assert_eq!(cli.args.notify, "stderr");
+    fn parse_report_mode() {
+        let cli = Cli::parse_from(["rusty-sweeper", "--cli", "--json", "/tmp"]);
+        assert!(cli.cli);
+        assert!(cli.json);
+        assert_eq!(cli.path, Some(PathBuf::from("/tmp")));
+    }
+
+    #[test]
+    fn report_options_require_cli() {
+        assert!(Cli::try_parse_from(["rusty-sweeper", "--json"]).is_err());
+        assert!(Cli::try_parse_from(["rusty-sweeper", "--depth", "1"]).is_err());
     }
 }

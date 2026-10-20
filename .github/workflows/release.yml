@@ -28,11 +28,9 @@ jobs:
         run: |
           mkdir -p dist/pkg
           cp target/release/rusty-sweeper dist/pkg/
-          cp target/release/rusty-sweeper-monitor dist/pkg/
           cp README.md dist/pkg/
           cp LICENSE dist/pkg/ 2>/dev/null || true
           cp dist/man/rusty-sweeper.1 dist/pkg/
-          cp dist/rusty-sweeper-monitor.service dist/pkg/
           tar -czvf rusty-sweeper-linux-x86_64.tar.gz -C dist/pkg .
 
       - name: Create Release

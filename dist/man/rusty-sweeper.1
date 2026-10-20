@@ -1,9 +1,9 @@
-.TH RUSTY-SWEEPER 1 "September 2026" "rusty-sweeper 0.3.1" "User Commands"
+.TH RUSTY-SWEEPER 1 "October 2026" "rusty-sweeper 0.4.0" "User Commands"
 .SH NAME
 rusty-sweeper \- a fast, interactive disk usage analyzer and cleaner for Linux
 .SH SYNOPSIS
 .B rusty-sweeper
-[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+[\fIOPTIONS\fR] [\fIPATH\fR]
 .SH DESCRIPTION
 .B rusty-sweeper
 is a disk usage management utility that provides:
@@ -11,17 +11,29 @@ is a disk usage management utility that provides:
 Interactive TUI with ncdu-like interface
 .IP \(bu 2
 Project detection and build artifact cleaning from within the TUI
-.SH STATUS
-Current implementation status:
-.IP \(bu 2
-\fBrusty-sweeper\fR launches the TUI directly
-.IP \(bu 2
-\fBrusty-sweeper-monitor\fR is the dedicated monitor binary
-.IP \(bu 2
-The configuration file is loaded and validated, but most command behavior is still driven directly by CLI flags
-.IP \(bu 2
-Standalone scan/clean/completion subcommands are no longer exposed on the main binary
+.SH MODES
+The default mode is an interactive TUI. With --cli, print a disk-usage
+report and exit. PATH defaults to the current working directory.
+CLI reports include hidden entries. Project cleanup is available with --cli --clean.
 .SH GLOBAL OPTIONS
+.TP
+.B --cli
+Print a full disk-usage tree and exit.
+.TP
+.B --clean
+Discover projects, report artifact paths and sizes, and ask for confirmation before
+cleaning. Requires --cli; conflicts with --json and --depth. Uses cleaner settings.
+Deletes listed local artifacts directly without running project scripts.
+Only y or yes confirms; empty input or EOF cancels.
+.TP
+.BR \-y ", " \-\-yes
+Skip cleanup confirmation. Requires --clean. The report is still printed.
+.TP
+.B --json
+Print the full scan as JSON. Requires --cli; conflicts with --depth.
+.TP
+.B --depth=N
+Limit text display depth (root = 0). Requires --cli. Totals include all descendants.
 .TP
 .BR \-c ", " \-\-config =\fIPATH\fR
 Path to configuration file
@@ -81,7 +93,7 @@ Quit
 .SH CONFIGURATION
 Configuration file: \fI~/.config/rusty-sweeper/config.toml\fR
 .PP
-This file is currently loaded and validated on startup, but most command behavior is not yet driven from config values.
+Scanner configuration applies to both CLI and TUI scans. Cleaner configuration applies to TUI and CLI cleanup.
 .PP
 Example:
 .PP
@@ -100,13 +112,6 @@ min_age_days = 7
 max_depth = 10
 parallel_jobs = 4
 
-[monitor]
-interval = 300
-warn_threshold = 80
-critical_threshold = 90
-mount_points = []
-notification_backend = "auto"
-
 [tui]
 color_scheme = "auto"
 show_hidden = false
@@ -118,32 +123,32 @@ large_dir_threshold = 1073741824
 .TP
 .I ~/.config/rusty-sweeper/config.toml
 User configuration file
-.TP
-.I $XDG_RUNTIME_DIR/rusty-sweeper.pid
-Monitor daemon PID file
-.TP
-.I ~/.local/state/rusty-sweeper/monitor.log
-Monitor daemon log file
 .SH EXIT STATUS
 .TP
 .B 0
 Success
 .TP
 .B 1
-General error
+Runtime error
 .TP
 .B 2
-Invalid cleaner type selection
-.TP
-.B 5
-Partial cleanup failure
+Invalid command-line arguments
 .SH EXAMPLES
 .TP
 Start the TUI:
 .B rusty-sweeper
 .TP
-Start monitor daemon with custom thresholds:
-.B rusty-sweeper-monitor -d -w 70 -C 85
+Print a disk-usage report:
+.B rusty-sweeper --cli --depth 1 /home
+.TP
+Export a scan as JSON:
+.B rusty-sweeper --cli --json /home
+.TP
+Preview and confirm project cleanup:
+.B rusty-sweeper --cli --clean /home/projects
+.TP
+Clean projects without prompting:
+.B rusty-sweeper --cli --clean -y /home/projects
 .SH AUTHOR
 Written by the rusty-sweeper contributors.
 .SH REPORTING BUGS

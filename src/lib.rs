@@ -1,16 +1,14 @@
 //! Rusty Sweeper - A Linux disk usage management utility
 //!
 //! This crate provides functionality for:
-//! - Monitoring disk usage with desktop notifications
+//! - Non-interactive disk usage reports
 //! - Discovering and cleaning build artifacts
 //! - Interactive TUI for disk exploration
 
 pub mod cleaner;
 pub mod cli;
-pub mod commands;
 pub mod config;
 pub mod error;
-pub mod monitor;
 pub mod scanner;
 pub mod tui;
 

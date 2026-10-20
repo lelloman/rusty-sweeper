@@ -4,20 +4,16 @@ A fast, interactive disk usage analyzer and cleaner for Linux.
 
 ## Current Status
 
-Rusty Sweeper is implemented and test-covered across its main command surface:
-
-- `rusty-sweeper` is the interactive product and launches the TUI directly.
-- `rusty-sweeper-monitor` is a dedicated monitor binary with one-shot checks, daemon mode, PID/log management, and multiple notification backends.
-
-Current limitations:
-
-- Some configuration sections remain informational, but scanner and TUI cleaner settings are active.
-- Cleanup and scan engines still exist in the codebase, but they are no longer exposed as standalone CLI subcommands.
+- `rusty-sweeper [PATH]` launches the interactive TUI.
+- `rusty-sweeper --cli [PATH]` prints a disk-usage report and exits.
+- Add `--json` for machine-readable output or `--depth N` to limit text display depth.
+- `rusty-sweeper --cli --clean [PATH]` previews project cleanup and asks for confirmation.
+- The monitor binary and service have been removed.
 
 ## Features
 
 - **Interactive TUI**: Browse disk usage and clean directly from the terminal
-- **Monitor Service**: Background daemon with desktop notifications when disk is full
+- **CLI reports**: Print disk usage as a tree or JSON for scripts
 
 ## Installation
 
@@ -45,28 +41,43 @@ rusty-sweeper
 
 # Scan a specific directory instead of the current working directory
 rusty-sweeper /path/to/scan
-
-# `rusty-sweeper` is the only user-facing mode of the main binary
 ```
 
-### Monitor Disk Usage
+### Non-interactive CLI
 
 ```bash
-# Check once and exit
-rusty-sweeper-monitor --once
+# Print a full disk-usage tree (defaults to the current directory)
+rusty-sweeper --cli /path/to/scan
 
-# Start as daemon
-rusty-sweeper-monitor --daemon
+# Show the root and its immediate children; totals still include all descendants
+rusty-sweeper --cli --depth 1 /path/to/scan
 
-# Custom thresholds (warn at 70%, critical at 85%)
-rusty-sweeper-monitor --warn 70 --critical 85
-
-# Check daemon status
-rusty-sweeper-monitor --status
-
-# Stop daemon
-rusty-sweeper-monitor --stop
+# Export the full scan as JSON
+rusty-sweeper --cli --json /path/to/scan > usage.json
 ```
+
+Reports include hidden entries and use the scanner configuration below. Text output
+marks entries with scan errors as `[!]`; JSON includes their error details.
+Diagnostics go to stderr, leaving stdout suitable for piping. `--json` and `--depth`
+require `--cli` and cannot be combined.
+
+### CLI project cleanup
+
+```bash
+# Discover projects, report artifacts and sizes, then ask for confirmation
+rusty-sweeper --cli --clean /path/to/projects
+
+# Print the same report and clean automatically
+rusty-sweeper --cli --clean -y /path/to/projects
+```
+
+The scan includes the root project and nested projects, using `[cleaner]` settings
+for project types, exclusions, maximum depth, minimum age, and parallel jobs.
+Cleanup deletes the listed local artifact directories directly. It does not run
+project scripts or clean global caches. Enter `y` or `yes` to confirm; any other
+response, an empty line, or end-of-input cancels. `-y` / `--yes` skips confirmation.
+The final report includes successes, failures, and space freed; any cleanup failure
+returns a nonzero exit status. `--clean` cannot be combined with `--json` or `--depth`.
 
 ## Configuration
 
@@ -89,13 +100,6 @@ exclude_patterns = ["**/.git", "**/vendor"]
 min_age_days = 0
 max_depth = 10
 parallel_jobs = 4
-
-[monitor]
-interval = 300  # seconds
-warn_threshold = 80
-critical_threshold = 90
-mount_points = []
-notification_backend = "auto"
 
 [tui]
 color_scheme = "auto"
@@ -136,25 +140,6 @@ returns to the TUI. Press `n` or `Esc` to leave the remaining files in place.
 ## Cleanup Support
 
 The TUI can identify and clean common local build artifacts for Cargo, npm, Python, CMake, Gradle, Maven, and .NET projects. Docker system resources are also surfaced when available.
-
-## Systemd Service
-
-To run the monitor as a systemd user service:
-
-```bash
-# Install the service
-./dist/install-service.sh
-
-# Enable and start
-systemctl --user enable rusty-sweeper-monitor
-systemctl --user start rusty-sweeper-monitor
-
-# Check status
-systemctl --user status rusty-sweeper-monitor
-
-# View logs
-journalctl --user -u rusty-sweeper-monitor -f
-```
 
 ## License
 

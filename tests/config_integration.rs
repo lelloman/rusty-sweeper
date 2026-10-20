@@ -5,13 +5,6 @@ use tempfile::NamedTempFile;
 #[test]
 fn parse_complete_config_file() {
     let config_content = r#"
-[monitor]
-interval = 600
-warn_threshold = 75
-critical_threshold = 85
-mount_points = ["/", "/home"]
-notification_backend = "dbus"
-
 [cleaner]
 project_types = ["cargo", "npm"]
 exclude_patterns = ["**/node_modules"]
@@ -37,8 +30,6 @@ large_dir_threshold = 536870912
 
     let config = Config::load(Some(file.path())).unwrap();
 
-    assert_eq!(config.monitor.interval, 600);
-    assert_eq!(config.monitor.warn_threshold, 75);
     assert_eq!(config.cleaner.min_age_days, 14);
     assert_eq!(config.scanner.parallel_threads, 4);
     assert!(config.tui.show_hidden);
@@ -47,8 +38,8 @@ large_dir_threshold = 536870912
 #[test]
 fn parse_partial_config_uses_defaults() {
     let config_content = r#"
-[monitor]
-interval = 120
+[scanner]
+parallel_threads = 2
 "#;
 
     let mut file = NamedTempFile::new().unwrap();
@@ -57,9 +48,9 @@ interval = 120
     let config = Config::load(Some(file.path())).unwrap();
 
     // Explicit value
-    assert_eq!(config.monitor.interval, 120);
+    assert_eq!(config.scanner.parallel_threads, 2);
     // Default values
-    assert_eq!(config.monitor.warn_threshold, 80);
+    assert_eq!(config.scanner.cache_ttl, 3600);
     assert_eq!(config.cleaner.max_depth, 10);
 }
 
@@ -75,7 +66,7 @@ fn parse_invalid_toml_returns_error() {
 }
 
 #[test]
-fn parse_invalid_threshold_returns_error() {
+fn obsolete_monitor_section_is_ignored() {
     let config_content = r#"
 [monitor]
 warn_threshold = 95
@@ -86,5 +77,5 @@ critical_threshold = 90
     file.write_all(config_content.as_bytes()).unwrap();
 
     let result = Config::load(Some(file.path()));
-    assert!(result.is_err());
+    assert!(result.is_ok());
 }

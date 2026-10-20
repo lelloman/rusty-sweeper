@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-20
+
+### Added
+
+- Add `--cli` for text disk-usage reports, `--json` for machine-readable scans, and `--depth` to limit text display depth.
+- Add `--cli --clean` to discover project artifacts, report reclaimable space, and confirm before cleanup; `-y` / `--yes` skips confirmation.
+- Apply cleaner settings to CLI project discovery and report cleanup failures with a nonzero exit status.
+
+### Changed
+
+- Send diagnostics to stderr so CLI reports can be piped or redirected.
+- Keep the TUI as the default interface.
+
+### Removed
+
+- Remove the `rusty-sweeper-monitor` executable, monitor library APIs and configuration, desktop notifications, and systemd service packaging.
+- Ignore obsolete `[monitor]` configuration sections for compatibility with existing config files.
+
 ## [0.3.1] - 2026-09-21
 
 ### Added

@@ -6,25 +6,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub monitor: MonitorConfig,
     pub cleaner: CleanerConfig,
     pub scanner: ScannerConfig,
     pub tui: TuiConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MonitorConfig {
-    /// Check interval in seconds
-    pub interval: u64,
-    /// Warning threshold percentage (0-100)
-    pub warn_threshold: u8,
-    /// Critical threshold percentage (0-100)
-    pub critical_threshold: u8,
-    /// Mount points to monitor (empty = all)
-    pub mount_points: Vec<PathBuf>,
-    /// Notification backend: auto, dbus, notify-send, stderr
-    pub notification_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,18 +50,6 @@ pub struct TuiConfig {
     pub default_sort: String,
     /// Size threshold for large directory warning (bytes)
     pub large_dir_threshold: u64,
-}
-
-impl Default for MonitorConfig {
-    fn default() -> Self {
-        Self {
-            interval: 300,
-            warn_threshold: 80,
-            critical_threshold: 90,
-            mount_points: vec![],
-            notification_backend: "auto".to_string(),
-        }
-    }
 }
 
 impl Default for CleanerConfig {
@@ -172,27 +144,7 @@ impl Config {
             source: e,
         })?;
 
-        config.validate()?;
         Ok(config)
-    }
-
-    /// Validate configuration values
-    pub fn validate(&self) -> Result<()> {
-        if self.monitor.warn_threshold > 100 {
-            return Err(ConfigError::Invalid("warn_threshold must be 0-100".to_string()).into());
-        }
-        if self.monitor.critical_threshold > 100 {
-            return Err(
-                ConfigError::Invalid("critical_threshold must be 0-100".to_string()).into(),
-            );
-        }
-        if self.monitor.warn_threshold >= self.monitor.critical_threshold {
-            return Err(ConfigError::Invalid(
-                "warn_threshold must be less than critical_threshold".to_string(),
-            )
-            .into());
-        }
-        Ok(())
     }
 
     /// Get the default config file path (for --config help text)
@@ -206,24 +158,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_is_valid() {
-        let config = Config::default();
-        assert_eq!(config.monitor.warn_threshold, 80);
-        assert_eq!(config.monitor.critical_threshold, 90);
-    }
-
-    #[test]
     fn config_serializes_to_toml() {
         let config = Config::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
-        assert!(toml_str.contains("[monitor]"));
-    }
-
-    #[test]
-    fn default_thresholds_are_valid() {
-        let config = MonitorConfig::default();
-        assert!(config.warn_threshold < config.critical_threshold);
-        assert!(config.critical_threshold <= 100);
+        assert!(toml_str.contains("[scanner]"));
     }
 
     #[test]
@@ -236,20 +174,12 @@ mod tests {
     #[test]
     fn load_returns_defaults_when_no_file() {
         let config = Config::load(None).unwrap();
-        assert_eq!(config.monitor.interval, 300);
+        assert_eq!(config.scanner.cache_ttl, 3600);
     }
 
     #[test]
     fn load_fails_on_invalid_explicit_path() {
         let result = Config::load(Some(Path::new("/nonexistent/config.toml")));
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_catches_invalid_thresholds() {
-        let mut config = Config::default();
-        config.monitor.warn_threshold = 95;
-        config.monitor.critical_threshold = 90;
-        assert!(config.validate().is_err());
     }
 }
